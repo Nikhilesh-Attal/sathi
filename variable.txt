@@ -1,0 +1,24 @@
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyASmgqmnbQuig1PxdhVZXVrBhN_QzwS8ek
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=sathi-c2976.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=sathi-c2976
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=sathi-c2976.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=701266243620
+NEXT_PUBLIC_FIREBASE_APP_ID=1:701266243620:web:730f7840439d77369068b1
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-C8MTDKVEBD
+GEMINI_API_KEY=AIzaSyCERhKhYvgX0W2frOY5zFlJ1dbRJgFf_yQ
+NEXT_PUBLIC_RECAPTCHA_SITE_KEY=6Lct33wrAAAAADfN2WATuPpIBTIUFy6ugWPKc-_4
+PEXELS_API_KEY=KIts9C2qjlloVCv7jfxiNiZEiW6cxcrolkDKn8x7XJw4D3rzMEZEtjKw
+
+import {QdrantClient} from '@qdrant/js-client-rest';
+
+const client = new QdrantClient({
+    url: 'https://fd64a61c-8972-4528-80a8-ca2910f1ecac.us-east4-0.gcp.cloud.qdrant.io:6333',
+    apiKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.lQap4Q2U5zCg-wrtC1PuPWLaCvG2APzDJN5tqiLH5vc',
+});
+
+try {
+    const result = await client.getCollections();
+    console.log('List of collections:', result.collections);
+} catch (err) {
+    console.error('Could not get collections:', err);
+}

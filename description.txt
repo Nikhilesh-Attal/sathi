@@ -1,0 +1,199 @@
+# Sathi — Qdrant Migration & Integration Guide
+
+> Purpose: document what was done, what remains, and exactly which files to change to move places data access from Firestore to Qdrant Cloud. Keep Firebase Authentication and user-specific data as-is.
+
+---
+
+## TL;DR (quick)
+
+* **Status:** Places data uploaded to **Qdrant Cloud**.
+* **Auth:** Firebase Auth remains unchanged.
+* **What to change now:** Replace Firestore reads used for the *places dataset/search* with Qdrant search calls.
+* **Files already using Qdrant:** `src/config/qdrantClient.ts`, `src/lib/qdrant.js`, `src/services/placesService.js` (these are good — keep them).
+
+---
+
+## Environment variables (add to `.env`)
+
+Use these names (consistent and clear):
+
+```env
+QDRANT_API_URL="https://your-cluster-id.region.aws.cloud.qdrant.io:6333"  # or the URL provided by Qdrant
+QDRANT_API_KEY="<your-qdrant-api-key>"
+QDRANT_COLLECTION="sathi_places"            # optional, default used in code
+DEEPSEEK_API_KEY="<your-deepseek-key>"     # optional, if you use DeepSeek for embeddings
+# If you keep any client-side Qdrant calls (less recommended), prefix with NEXT_PUBLIC_
+# NEXT_PUBLIC_QDRANT_ENDPOINT=...
+```
+
+> Note: For server-side code (Next.js API routes), prefer non-`NEXT_PUBLIC_` vars so they are not exposed to the browser.
+
+---
+
+## Files I scanned & where Firebase still appears
+
+(You already gave me the repo — I scanned everything.)
+
+Files containing Firebase/Firestore usage (29 files found). **Key ones related to places or search:**
+
+* `src/lib/hybrid-search-service.ts`  ← **MUST CHANGE** (search currently queries Firestore)
+* `src/lib/data-import-service.ts`    ← Importer that writes to Firestore — **optional** (deprecated now)
+* `src/app/api/test-firebase/route.ts` ← test endpoint that reads `osm_places` — **CHANGE** to test Qdrant
+* `src/lib/cache.ts`                 ← Firestore-backed cache (optional to migrate)
+
+Files that *use* places data but already point to Qdrant or services:
+
+* `src/config/qdrantClient.ts`        ← Qdrant axios wrapper (already implemented)
+* `src/lib/qdrant.js`                ← duplicate/alternate qdrant helper
+* `src/services/placesService.js`    ← high-level places service (already calls qdrantClient)
+
+Files that are **user-specific** (leave Firebase): auth and saved-user data — do NOT change unless you want to migrate user data too:
+
+* `src/lib/firebase.ts`
+* `src/app/login/page.tsx`
+* `src/context/saved-places-context.tsx`
+* `src/components/app/saved-plans-tab.tsx`
+* `src/lib/services/*` (user-plan-service, plan-usage-service, payment-service)
+
+> I **did not** change any files — this is an analysis + migration plan.
+
+---
+
+## Recommended minimal migration steps (safe & incremental)
+
+1. **Keep Firebase Auth & user data** intact.
+2. **Wire server-side Qdrant client** (already present in `src/config/qdrantClient.ts`). Confirm env var names. Update if needed.
+3. **Replace Firestore search in `lib/hybrid-search-service.ts`** with calls to `qdrantClient.searchByText(...)` or `qdrantClient.searchNearbyPlaces(...)`.
+4. **Replace `app/api/test-firebase/route.ts`** with a Qdrant health/test route (e.g., call `qdrantClient.getCollectionInfo()` or search a small sample).
+5. (Optional) Retire `lib/data-import-service.ts` (or change to upload-to-qdrant script). Keep for archival if you want Firestore as backup.
+6. (Optional) Migrate `lib/cache.ts` if you rely on Firestore cache counts — or keep it and only remove very large place caches.
+7. **Test**: run a couple of API calls from the client UI or curl (examples below).
+
+---
+
+## Concrete replacement examples (copy-paste)
+
+### 1) Server-side Qdrant client (if you prefer TypeScript server helper)
+
+Create `src/lib/qdrant.ts` (server-side) or confirm `src/config/qdrantClient.ts` is used from server code.
+
+```ts
+// src/lib/qdrant.ts
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+if (!process.env.QDRANT_API_URL || !process.env.QDRANT_API_KEY) {
+  throw new Error('QDRANT_API_URL or QDRANT_API_KEY missing');
+}
+
+export const qdrantClient = new QdrantClient({
+  url: process.env.QDRANT_API_URL,
+  apiKey: process.env.QDRANT_API_KEY,
+});
+
+export default qdrantClient;
+```
+
+> Your repo already contains an axios-based `src/config/qdrantClient.ts` — you can keep it, or use the official client above for server-side code.
+
+### 2) Replace Firestore search with Qdrant search (example for `lib/hybrid-search-service.ts`)
+
+**Old (Firestore style)**
+
+```ts
+const placesRef = collection(db, 'osm_places');
+const snap = await getDocs(query(placesRef, where('name', '>=', q), limit(50)));
+const results = snap.docs.map(d => d.data());
+```
+
+**New (Qdrant style)**
+
+```ts
+import qdrantClient from '@/config/qdrantClient'; // or '@/lib/qdrant'
+import { getEmbedding } from '@/ai/genkit'; // or an embeddings API route
+
+const emb = await getEmbedding(q);
+const qdrantRes = await qdrantClient.searchByText(q, async () => emb, {}, 50); // your wrapper already has searchByText
+// OR call lower-level client:
+// const qdrantRes = await qdrantClient.search('sathi_places', { vector: emb, limit: 50, with_payload: true });
+
+const results = qdrantRes.map(r => r.payload);
+```
+
+### 3) Nearby search with geo filter (e.g., `getNearbyPlaces`)
+
+If you have lat/lon from user:
+
+```ts
+// If config/qdrantClient exposes a helper
+const results = await qdrantClient.searchNearbyPlaces(userLat, userLon, radiusMeters, category, limit);
+
+// Lower-level (manual build):
+const filter = {
+  must: [
+    {
+      'geo_radius': { key: 'geo', center: { lat: userLat, lon: userLon }, radius: radiusMeters }
+    }
+  ]
+};
+const searchRes = await qdrantClient.search('sathi_places', { vector: emb, limit, filter, with_payload: true});
+```
+
+Note: Make sure uploaded payloads use consistent `geo` or `lat`/`lon` fields (see upload step earlier). Your current uploaded payloads already include `latitude` and `longitude` and `tags` — I recommend also adding `geo: { lat, lon }` for convenience.
+
+### 4) Get place by ID (replacement for `doc(db, 'places', id)`)
+
+```ts
+const r = await qdrantClient.retrieve('sathi_places', { ids: [id], with_payload: true });
+// r[0].payload -> the place object
+```
+
+---
+
+## Files to edit now (priority)
+
+Edit these files to remove Firestore dependency for *places* data and call Qdrant instead:
+
+* `src/lib/hybrid-search-service.ts`  — **primary**: replace Firestore search implementation with calls to your `qdrantClient` helpers (see example above).
+* `src/app/api/test-firebase/route.ts` — update this test route to verify Qdrant (e.g., `getCollectionInfo()` or `search` ping).
+* `src/lib/data-import-service.ts` — optional: either remove or convert into a Qdrant uploader script (useful for re-importing data).
+* `src/lib/cache.ts` — optional: if caches are Firestore-backed for places, decide to keep or migrate.
+
+Files you should NOT change (for now):
+
+* `src/lib/firebase.ts` (auth setup)
+* `src/app/login/page.tsx`, `src/context/saved-places-context.tsx`, `src/components/app/saved-plans-tab.tsx`, user-plan services — these manage user accounts and saved data and should stay in Firestore unless you intentionally migrate them.
+
+---
+
+## How to test (quick)
+
+1. Start local dev server. Ensure `.env` has `QDRANT_API_URL` and `QDRANT_API_KEY`.
+2. Hit an existing front-end search component (many pages already call `services/placesService.js` which uses `config/qdrantClient.ts`) and try queries like "museum near Jaipur" or "waterfall near 22.67,81.75".
+
+**Curl example** (replace values):
+
+```bash
+curl "http://localhost:3000/api/search-places?q=waterfall&lat=22.67&lon=81.75&radius=50000"
+```
+
+(Your actual API path may differ — some components call services client-side.)
+
+---
+
+## Next steps I can do for you
+
+* I can **generate precise code diffs/PR** for each file that needs changing (e.g., patch `lib/hybrid-search-service.ts`), or
+* I can **implement a server-side `/api/embeddings` route** that wraps your chosen embedding provider (DeepSeek or Gemini → DeepSeek), or
+* I can **convert `lib/data-import-service.ts` into a qdrant uploader script** (one-time use).
+
+Tell me which you prefer and I will prepare the code changes. If you want me to proceed automatically, say **"Patch files"** and I'll create the exact replacements for `lib/hybrid-search-service.ts` and `app/api/test-firebase/route.ts`.
+
+---
+
+## Appendix: Useful snippets referenced above
+
+(Fragments are also in the guide sections — keep them handy when implementing.)
+
+---
+
+That's the README/guide. If you'd like, I can also create a short checklist you can tick off as we patch each file.

@@ -1,0 +1,65 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /** ========================
+     * USERS
+     * ======================== */
+    // Each user can only access their own document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Allow access to subcollections under each user
+    match /users/{userId}/{documents=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    /** ========================
+     * PAYMENTS
+     * ======================== */
+    // User can read their own payment record
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow write: if false; // Only backend/webhook writes
+    }
+
+    /** ========================
+     * USAGE TRACKING
+     * ======================== */
+    match /usage/{usageId} {
+      allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    /** ========================
+     * API CACHE (public read)
+     * ======================== */
+    match /api_cache/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /** ========================
+     * TRIPS (public read, logged-in write)
+     * ======================== */
+    match /trips/{tripId} {
+      allow read: if true; // Anyone can read shared trips
+      allow write: if request.auth != null; // Any logged-in user can create/update trips
+    }
+
+    // Allow same access for any subcollections under trips
+    match /trips/{tripId}/{sub=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    /** ========================
+     * PLACES (public read only)
+     * ======================== */
+    match /places/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
