@@ -1,10 +1,9 @@
 
 'use client';
 
-import * as React from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { LoadingSpinner } from '@/components/app/loading-spinner';
+import { Logo } from '@/components/app/logo';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -17,13 +16,17 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Logo } from '@/components/app/logo';
 import { useToast } from '@/hooks/use-toast';
 import { auth } from '@/lib/firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { LoadingSpinner } from '@/components/app/loading-spinner';
-import { motion, AnimatePresence } from 'framer-motion';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import { AnimatePresence, motion } from 'framer-motion';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import * as React from 'react';
+
+import loginAnimation from "@/assets/animations/login.json";
+import signupAnimation from "@/assets/animations/signup.json";
+import Lottie from "lottie-react";
 
 const motionVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -140,29 +143,21 @@ export default function LoginPage() {
         </Link>
         <div className="flex-1 flex items-center justify-center overflow-hidden">
           <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.5 }}
-              className="relative w-full h-96 my-8 max-w-md"
-            >
-              <Image
-                src={activeTab === 'login' ? 'https://placehold.co/800x600' : 'https://placehold.co/800x600'}
-                alt={activeTab === 'login' ? 'Animation of a traveler finding a location on a map' : 'Animation of a traveler walking with luggage'}
-                fill
-                className="rounded-lg object-cover"
-                data-ai-hint={activeTab === 'login' ? 'traveler map animation' : 'traveler walking animation'}
-              />
-               <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
-                  <p className="text-white text-center p-4 bg-black/50 rounded-md text-sm">
-                      This is a placeholder for a Lottie animation.
-                      <br />
-                      {activeTab === 'login' ? 'Represents a returning traveler.' : 'Represents starting a new journey.'}
-                  </p>
-              </div>
-            </motion.div>
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.5 }}
+                className="relative w-full h-96 my-8 max-w-md"
+              >
+                <Lottie
+                  animationData={activeTab === "login" ? loginAnimation : signupAnimation}
+                  loop
+                  autoplay
+                  className="w-full h-full rounded-lg"
+                />
+              </motion.div>
           </AnimatePresence>
         </div>
         <blockquote className="mt-auto space-y-2">
