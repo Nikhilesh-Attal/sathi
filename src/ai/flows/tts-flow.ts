@@ -96,22 +96,45 @@
 
 'use server';
 
-import { z } from 'zod';
-import { type TtsInput } from '@/lib/schemas';
-
-const TtsOutputSchema = z.object({
-  media: z.string().describe('The URL or base64 data of the audio file.'),
-});
-
-export type TtsOutput = z.infer<typeof TtsOutputSchema>;
+import { ai } from '@/ai/genkit';
+import { TtsInputSchema, TtsOutputSchema, type TtsInput, type TtsOutput } from '@/lib/schemas';
+import { googleAI } from '@genkit-ai/googleai';
 
 export async function textToSpeech(input: TtsInput): Promise<TtsOutput> {
   try {
-    // Mock implementation: Convert text to a base64 audio data URL
-    const audioData = `data:audio/mp3;base64,${Buffer.from(input.text).toString('base64')}`;
+    const validatedInput = TtsInputSchema.parse(input);
+    console.log('[textToSpeech] Input:', validatedInput);
+    
+    if (!validatedInput.text || !validatedInput.text.trim()) {
+      throw new Error('Text to convert cannot be empty.');
+    }
+
+    // Try to use Gemini TTS first (if available)
+    try {
+      console.log('[textToSpeech] Attempting Gemini TTS...');
+      
+      const { media } = await ai.generate({
+        model: 'googleai/gemini-1.5-flash-latest', // Use available model
+        prompt: `Please provide text-to-speech for: "${validatedInput.text}"`,
+      });
+
+      if (media && media.url) {
+        console.log('[textToSpeech] Gemini TTS success');
+        return TtsOutputSchema.parse({ media: media.url });
+      }
+    } catch (geminiError) {
+      console.warn('[textToSpeech] Gemini TTS not available:', geminiError);
+    }
+
+    // Fallback: Create a simple audio URL for Web Speech API to handle on client
+    // This creates a data URL that the client can use with speechSynthesis
+    console.log('[textToSpeech] Using client-side TTS fallback');
+    const textData = encodeURIComponent(validatedInput.text);
+    const audioData = `data:text/plain;charset=utf-8,${textData}`;
+    
     return TtsOutputSchema.parse({ media: audioData });
-  } catch (err) {
-    console.error('Text-to-speech error:', err);
-    throw new Error('Failed to generate audio.');
+  } catch (err: any) {
+    console.error('[textToSpeech] Error:', err);
+    throw new Error(`Failed to generate audio: ${err.message}`);
   }
 }

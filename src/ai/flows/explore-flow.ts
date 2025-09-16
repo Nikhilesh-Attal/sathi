@@ -652,6 +652,7 @@ import { fetchPlacesFromOpenStreetMap, fetchHotelsFromOpenStreetMap, fetchRestau
 import { getFromCache, setInCache, createCacheKey } from '@/lib/cache';
 import { Point } from '@qdrant/js-client-rest/types/types';
 import { normalizeList } from "@/lib/normalizers";
+import { cacheService, type CachedLocationData } from '@/lib/cache-service';
 
 const RADIUS_TIERS = [50000, 100000, 150000, 200000, 300000, 500000];
 
@@ -759,11 +760,28 @@ const exploreFlow = ai.defineFlow(
   async ({ latitude, longitude }) => {
     console.log(`[exploreFlow] Starting exploration for lat: ${latitude}, lon: ${longitude}`);
 
-    // 1. Try Qdrant (only if in India)
-    if (isLocationInIndia(latitude, longitude)) {
-      console.log(`[exploreFlow] Location is in India. Attempting tiered search from Qdrant.`);
+    // 0. Check cache first
+    const cached = cacheService.get(latitude, longitude, 10000); // 10km default radius
+    if (cached) {
+      console.log(`[exploreFlow] ✅ Cache hit! Returning ${cached.places.length} cached places`);
+      const places = cached.places.filter(p => p.itemType === 'place');
+      const hotels = cached.places.filter(p => p.itemType === 'hotel');
+      const restaurants = cached.places.filter(p => p.itemType === 'restaurant');
+      return {
+        places,
+        hotels,
+        restaurants
+      };
+    }
 
-      for (const radius of RADIUS_TIERS) {
+    // 1. Try Qdrant (only if in India) - but optimize the radius tiers
+    if (isLocationInIndia(latitude, longitude)) {
+      console.log(`[exploreFlow] Location is in India. Attempting optimized Qdrant search...`);
+
+      // Use only 2 radius tiers for faster results
+      const optimizedRadii = [100000, 500000]; // 100km, 500km
+      
+      for (const radius of optimizedRadii) {
         try {
           console.log(`[exploreFlow] Searching Qdrant with radius: ${radius}m`);
           const qdrantResults = await fetchPlacesFromQdrant({ latitude, longitude, radiusMeters: radius });
@@ -774,6 +792,15 @@ const exploreFlow = ai.defineFlow(
 
           if (normalizedQdrantPlaces.length > 0 || normalizedQdrantHotels.length > 0 || normalizedQdrantRestaurants.length > 0) {
             console.log(`[exploreFlow] ✅ Qdrant returned results for radius ${radius}m - Places: ${normalizedQdrantPlaces.length}, Hotels: ${normalizedQdrantHotels.length}, Restaurants: ${normalizedQdrantRestaurants.length}`);
+            
+            // Cache successful results
+            const allPlaces = [
+              ...normalizedQdrantPlaces.map(p => ({ ...p, itemType: 'place' as const })),
+              ...normalizedQdrantHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
+              ...normalizedQdrantRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
+            ];
+            cacheService.set(latitude, longitude, radius, allPlaces);
+            
             return {
               places: normalizedQdrantPlaces,
               hotels: normalizedQdrantHotels,
@@ -818,6 +845,15 @@ const exploreFlow = ai.defineFlow(
 
       if (normalizedGeoPlaces.length > 0 || normalizedGeoHotels.length > 0 || normalizedGeoRestaurants.length > 0) {
         console.log(`[exploreFlow] ✅ Geoapify returned Places: ${normalizedGeoPlaces.length}, Hotels: ${normalizedGeoHotels.length}, Restaurants: ${normalizedGeoRestaurants.length}`);
+        
+        // Cache successful results
+        const allPlaces = [
+          ...normalizedGeoPlaces.map(p => ({ ...p, itemType: 'place' as const })),
+          ...normalizedGeoHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
+          ...normalizedGeoRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
+        ];
+        cacheService.set(latitude, longitude, 5000, allPlaces);
+        
         return {
           places: normalizedGeoPlaces,
           hotels: normalizedGeoHotels,

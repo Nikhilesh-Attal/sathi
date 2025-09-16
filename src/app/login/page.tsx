@@ -55,18 +55,36 @@ export default function LoginPage() {
         throw new Error("Firebase is not configured correctly. Please check the console.");
       }
 
+      let authResult;
       if (type === 'signup') {
         // With no database, we don't need the user's name during signup for a profile.
         // We can get it from the Auth object later if needed.
-        await createUserWithEmailAndPassword(auth, email, password);
-        toast({ title: "Account Created!", description: "You have been successfully signed up." });
+        authResult = await createUserWithEmailAndPassword(auth, email, password);
+        if (authResult?.user) {
+          toast({ title: "Account Created!", description: "You have been successfully signed up." });
+        }
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
-        toast({ title: "Login Successful!", description: "Welcome back." });
+        authResult = await signInWithEmailAndPassword(auth, email, password);
+        if (authResult?.user) {
+          toast({ title: "Login Successful!", description: "Welcome back." });
+        }
       }
-      router.push('/dashboard');
+      
+      // Only navigate if we have a valid user
+      if (authResult?.user) {
+        router.push('/dashboard');
+      } else {
+        throw new Error('Authentication failed - no user returned');
+      }
     } catch (err: any) {
       console.error("Authentication error:", err);
+      
+      // Handle null or undefined errors gracefully
+      if (!err) {
+        setError('An unknown error occurred during authentication.');
+        return;
+      }
+      
       const friendlyMessage = err.code?.replace('auth/', '').replace(/-/g, ' ') || err.message || 'An unexpected error occurred.';
       setError(`Error: ${friendlyMessage}`);
       toast({

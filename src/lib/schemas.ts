@@ -59,6 +59,17 @@ export const TranslatorOutputSchema = z.object({
 });
 export type TranslatorOutput = z.infer<typeof TranslatorOutputSchema>;
 
+// --- Text-to-Speech ---
+export const TtsInputSchema = z.object({
+  text: z.string().describe('The text to convert to speech.'),
+});
+export type TtsInput = z.infer<typeof TtsInputSchema>;
+
+export const TtsOutputSchema = z.object({
+  media: z.string().describe('The URL or base64 data of the audio file.'),
+});
+export type TtsOutput = z.infer<typeof TtsOutputSchema>;
+
 
 // --- Place Discovery ---
 export const ExploreInputSchema = z.object({

@@ -30,17 +30,32 @@ const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebas
 
 // Initialize App Check
 if (typeof window !== 'undefined') {
-  if (!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY) {
+  const recaptchaKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
+  
+  if (!recaptchaKey) {
     console.warn("Firebase App Check reCAPTCHA site key is missing. App Check will not be initialized. Please add NEXT_PUBLIC_RECAPTCHA_SITE_KEY to your .env file.");
   } else {
     try {
-      initializeAppCheck(app, {
-        provider: new ReCaptchaV3Provider(process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY),
-        isTokenAutoRefreshEnabled: true,
-      });
-      console.log("Firebase App Check initialized successfully.");
-    } catch(e) {
-      console.error("Error initializing Firebase App Check:", e);
+      // Check if App Check is already initialized
+      const existingAppCheck = (globalThis as any).__FIREBASE_APPCHECK_INITIALIZED__;
+      
+      if (!existingAppCheck) {
+        initializeAppCheck(app, {
+          provider: new ReCaptchaV3Provider(recaptchaKey),
+          isTokenAutoRefreshEnabled: true,
+        });
+        
+        // Mark as initialized to prevent duplicate initialization
+        (globalThis as any).__FIREBASE_APPCHECK_INITIALIZED__ = true;
+        console.log("Firebase App Check initialized successfully.");
+      }
+    } catch(e: any) {
+      // Suppress ReCAPTCHA errors in development or provide better error handling
+      if (e?.code === 'appCheck/recaptcha-error') {
+        console.warn("ReCAPTCHA initialization failed. This might be due to development environment or network issues. App Check will retry automatically.");
+      } else {
+        console.error("Error initializing Firebase App Check:", e);
+      }
     }
   }
 }

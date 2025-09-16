@@ -19,10 +19,16 @@ function Header() {
   const router = useRouter();
 
   const handleLogout = async () => {
-    if (auth) {
-      await auth.signOut();
+    try {
+      if (auth && auth.currentUser) {
+        await auth.signOut();
+      }
+      router.push('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Still navigate even if signout fails
+      router.push('/');
     }
-    router.push('/');
   };
 
   return (

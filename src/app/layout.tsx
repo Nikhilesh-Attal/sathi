@@ -2,8 +2,9 @@ import type {Metadata} from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { SavedPlacesProvider } from '@/context/saved-places-context';
-
 import { LiveLocationProvider } from '@/context/live-location-context';
+import { ErrorBoundary } from '@/components/app/error-boundary';
+import { ErrorHandlerProvider } from '@/components/app/error-handler-provider';
 export const metadata: Metadata = {
   title: 'SATHI: Your AI Travel Ally',
   description: 'Your AI-powered companion for travel planning, discovery, and budgeting.',
@@ -24,11 +25,15 @@ export default function RootLayout({
 
       </head>
       <body className="font-body antialiased">
-        <LiveLocationProvider>
-          <SavedPlacesProvider>
-            {children}
-          </SavedPlacesProvider>
-        </LiveLocationProvider>
+        <ErrorBoundary>
+          <ErrorHandlerProvider>
+            <LiveLocationProvider>
+              <SavedPlacesProvider>
+                {children}
+              </SavedPlacesProvider>
+            </LiveLocationProvider>
+          </ErrorHandlerProvider>
+        </ErrorBoundary>
         <Toaster />
       </body>
     </html>

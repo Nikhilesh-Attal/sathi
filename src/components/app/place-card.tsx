@@ -26,6 +26,15 @@ const typeToBadge = (item: Place): string => {
 };
 
 export function PlaceCard({ item, isSelected, onClick }: PlaceCardProps) {
+  const [imgSrc, setImgSrc] = React.useState(item.photoUrl || 'https://placehold.co/400x400.png');
+  const [imgError, setImgError] = React.useState(false);
+  
+  const handleImageError = () => {
+    if (!imgError) {
+      setImgError(true);
+      setImgSrc('https://placehold.co/400x400/e2e8f0/64748b?text=No+Image');
+    }
+  };
   
   return (
     <div
@@ -38,13 +47,14 @@ export function PlaceCard({ item, isSelected, onClick }: PlaceCardProps) {
     >
       <div className="relative w-24 h-24 rounded-md overflow-hidden shrink-0">
         <Image
-          src={item.photoUrl || 'https://placehold.co/400x400.png'}
+          src={imgSrc}
           alt={item.name}
           fill
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
           loading="lazy"
           className="object-cover"
           data-ai-hint={item.photoHint || 'travel place'}
+          onError={handleImageError}
         />
       </div>
       <div className="flex-1 flex flex-col justify-between">

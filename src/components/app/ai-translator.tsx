@@ -51,6 +51,19 @@ export function AiTranslator() {
   const recognitionRef = React.useRef<any>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
 
+  const [voices, setVoices] = React.useState<SpeechSynthesisVoice[]>([]);
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const synth = window.speechSynthesis;
+    const loadVoices = () => setVoices(synth.getVoices());
+    loadVoices();
+    synth.onvoiceschanged = loadVoices;
+    return () => {
+      // @ts-ignore
+      synth.onvoiceschanged = null;
+    };
+  }, []);
+
   const form = useForm<z.infer<typeof TranslatorInputSchema>>({
     resolver: zodResolver(TranslatorInputSchema),
     defaultValues: {
@@ -97,7 +110,7 @@ export function AiTranslator() {
     return () => {
       recognitionRef.current?.stop();
     };
-  }, [toast, form]);
+  }, []);
 
   React.useEffect(() => {
     if (audioSrc && audioRef.current) {
@@ -150,12 +163,35 @@ export function AiTranslator() {
   }
 
   const handleToggleRecording = () => {
+    const rec = recognitionRef.current;
+    if (!rec) {
+      toast({
+        title: 'Initializing microphone',
+        description: 'Please wait a moment and try again.',
+      });
+      return;
+    }
     if (isRecording) {
-      recognitionRef.current?.stop();
+      setIsRecording(false);
+      try {
+        rec.stop();
+      } catch (e) {
+        // ignore
+      }
     } else {
       form.setValue('text', '');
       setTranslation(null);
-      recognitionRef.current?.start();
+      try {
+        setIsRecording(true);
+        rec.start();
+      } catch (e: any) {
+        setIsRecording(false);
+        toast({
+          variant: 'destructive',
+          title: 'Microphone Error',
+          description: e?.message || 'Could not start recording.',
+        });
+      }
     }
   };
 
@@ -163,16 +199,110 @@ export function AiTranslator() {
     if (!textToPlay || isAudioLoading) return;
     setIsAudioLoading(true);
     setAudioSrc(null);
-    const result = await convertTextToSpeech({ text: textToPlay });
-    setIsAudioLoading(false);
 
-    if (result.success && result.data) {
-      setAudioSrc(result.data.media);
-    } else {
+    // First try Web Speech API (browser native TTS)
+    if ('speechSynthesis' in window) {
+      try {
+        console.log('[handlePlayAudio] Using Web Speech API');
+        window.speechSynthesis.cancel(); // Cancel any ongoing speech
+        
+        const utterance = new SpeechSynthesisUtterance(textToPlay);
+        const targetLang = form.getValues('targetLanguage');
+        const targetLocale = languageMap[targetLang] || 'en-US';
+        utterance.lang = targetLocale;
+        const matchedVoice = voices.find(v => v.lang?.toLowerCase().startsWith(targetLocale.toLowerCase()));
+        if (matchedVoice) {
+          utterance.voice = matchedVoice;
+        }
+        utterance.rate = 0.9;
+        utterance.pitch = 1;
+        
+        utterance.onstart = () => {
+          console.log('[handlePlayAudio] Speech started');
+        };
+        
+        utterance.onend = () => {
+          console.log('[handlePlayAudio] Speech ended');
+          setIsAudioLoading(false);
+        };
+        
+        utterance.onerror = (event) => {
+          console.error('[handlePlayAudio] Speech error:', event);
+          setIsAudioLoading(false);
+          toast({
+            variant: 'destructive',
+            title: 'Speech Error',
+            description: 'Failed to play speech. Trying alternative method...',
+          });
+          // Fallback to server TTS
+          fallbackToServerTTS(textToPlay);
+        };
+        
+        window.speechSynthesis.speak(utterance);
+        return; // Exit early if Web Speech API works
+      } catch (error) {
+        console.warn('[handlePlayAudio] Web Speech API failed:', error);
+      }
+    }
+
+    // Fallback to server TTS
+    fallbackToServerTTS(textToPlay);
+  };
+
+  const fallbackToServerTTS = async (textToPlay: string) => {
+    try {
+      console.log('[fallbackToServerTTS] Using server TTS');
+      const result = await convertTextToSpeech({ text: textToPlay });
+      
+      if (result.success && result.data) {
+        // Check if it's a data URL with text (our fallback)
+        if (result.data.media.startsWith('data:text/plain')) {
+          const text = decodeURIComponent(result.data.media.split(',')[1]);
+          if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            const targetLocale = languageMap[form.getValues('targetLanguage')] || 'en-US';
+            utterance.lang = targetLocale;
+            const matchedVoice = voices.find(v => v.lang?.toLowerCase().startsWith(targetLocale.toLowerCase()));
+            if (matchedVoice) {
+              utterance.voice = matchedVoice;
+            }
+            utterance.onend = () => setIsAudioLoading(false);
+            utterance.onerror = () => {
+              setIsAudioLoading(false);
+              toast({
+                variant: 'destructive',
+                title: 'Audio Error',
+                description: 'Text-to-speech is not available in your browser.',
+              });
+            };
+            window.speechSynthesis.speak(utterance);
+          } else {
+            setIsAudioLoading(false);
+            toast({
+              variant: 'destructive',
+              title: 'Audio Not Supported',
+              description: 'Text-to-speech is not available in your browser.',
+            });
+          }
+        } else {
+          // It's a real audio URL
+          setAudioSrc(result.data.media);
+          setIsAudioLoading(false);
+        }
+      } else {
+        setIsAudioLoading(false);
+        toast({
+          variant: 'destructive',
+          title: 'Audio Error',
+          description: result.error || 'Failed to generate audio',
+        });
+      }
+    } catch (error) {
+      setIsAudioLoading(false);
       toast({
         variant: 'destructive',
         title: 'Audio Error',
-        description: result.error || 'Failed to generate audio',
+        description: 'Failed to generate audio. Please try again.',
       });
     }
   };
@@ -258,7 +388,7 @@ export function AiTranslator() {
                 variant={isRecording ? 'destructive' : 'default'}
                 className="rounded-full h-20 w-20"
                 onClick={handleToggleRecording}
-                disabled={!recognitionRef.current || isProcessing}
+                disabled={isProcessing}
               >
                 {isRecording ? <MicOff className="h-8 w-8" /> : <Mic className="h-8 w-8" />}
               </Button>
@@ -294,7 +424,7 @@ export function AiTranslator() {
             </div>
           </form>
         </Form>
-        {audioSrc && <audio ref={audioRef} src={audioSrc} hidden />}
+        {audioSrc && <audio ref={audioRef} src={audioSrc} hidden autoPlay playsInline onCanPlayThrough={() => audioRef.current?.play()} />}
       </CardContent>
     </Card>
   );

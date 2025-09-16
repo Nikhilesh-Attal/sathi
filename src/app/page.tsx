@@ -123,7 +123,7 @@ export default function LandingPage() {
       <main className="flex-1">
         {/* Modified Hero Section */}
         <section className="w-full py-12 md:py-24 lg:py-32 xl:py-48 bg-primary/5 relative">
-          <div className="absolute inset-0 opacity-20 bg-cover bg-center" style={{ backgroundImage: 'url(/illustrations/smiling-traveler-silhouette.png)' }}></div>
+          <div className="absolute inset-0 opacity-10 bg-cover bg-center" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=800&q=80)' }}></div>
           <div className="container px-4 md:px-6 relative z-10">
             <div className="flex flex-col items-center space-y-4 text-center">
               <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tighter" style={{ fontFamily: 'cursive' }}>
@@ -132,8 +132,8 @@ export default function LandingPage() {
               <p className="max-w-[700px] text-muted-foreground md:text-xl">
                 Plan smarter with AI—discover hidden gems, translate languages, and more in real-time.
               </p>
-              <Button size="lg" className="rounded-lg hover:scale-105 transition-transform">
-                Get Started for Free
+              <Button asChild size="lg" className="rounded-lg hover:scale-105 transition-transform">
+                <Link href="/login">Get Started for Free</Link>
               </Button>
             </div>
           </div>
@@ -197,12 +197,12 @@ export default function LandingPage() {
         {/* Modified Discover Section with overlay and CTA */}
         <div className="relative">
           <div className="absolute inset-0 opacity-20 flex items-center justify-center pointer-events-none">
-            <Image src="/illustrations/hand-pointing.png" alt="Hand pointing to location" width={200} height={200} />
+            <div className="text-6xl">👆</div>
           </div>
           <MapPreviewSection livePlaces={livePlaces} liveLocation={liveLocation} />
           <div className="container px-4 md:px-6 text-center mt-8">
-            <Button variant="outline" className="rounded-lg text-primary border-primary hover:bg-primary/10" style={{ fontFamily: 'cursive' }}>
-              Explore Now!
+            <Button asChild variant="outline" className="rounded-lg text-primary border-primary hover:bg-primary/10" style={{ fontFamily: 'cursive' }}>
+              <Link href="/dashboard">Explore Now!</Link>
             </Button>
           </div>
         </div>

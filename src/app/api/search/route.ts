@@ -26,3 +26,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
   }
 }
+
+// Handle GET requests to prevent 405 errors
+export async function GET(req: Request) {
+  return NextResponse.json({ 
+    error: "Method not allowed. Use POST with latitude and longitude in request body." 
+  }, { status: 405 });
+}
