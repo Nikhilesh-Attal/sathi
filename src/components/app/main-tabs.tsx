@@ -1,4 +1,3 @@
-
 // 'use client';
 
 // import * as React from 'react';
@@ -140,7 +139,7 @@
 
 import * as React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Languages, Bot, Bookmark } from 'lucide-react';
+import { MapPin, Languages, Bot } from 'lucide-react';
 import { ExplorePage } from '@/components/app/explore-page';
 import { Card } from '../ui/card';
 import { AiTranslator } from './ai-translator';
@@ -241,11 +240,10 @@ export function MainTabs() {
     const { activeTab, setActiveTab } = useTabContext();
     return (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4 h-auto bg-transparent rounded-none p-0">
+            <TabsList className="grid w-full grid-cols-3 h-auto bg-transparent rounded-none p-0">
                 <TabsTrigger value="explore" className="gap-1.5"><MapPin className="h-4 w-4" />Explore</TabsTrigger>
                 <TabsTrigger value="assistant" className="gap-1.5"><Bot className="h-4 w-4" />AI Assistant</TabsTrigger>
-                {/*<TabsTrigger value="saved" className="gap-1.5"><Bookmark className="h-4 w-4" />Saved</TabsTrigger>
-                <TabsTrigger value="translator" className="gap-1.5"><Languages className="h-4 w-4" />Translator</TabsTrigger>*/}
+                <TabsTrigger value="translator" className="gap-1.5"><Languages className="h-4 w-4" />Translator</TabsTrigger>
             </TabsList>
         </Tabs>
     );
