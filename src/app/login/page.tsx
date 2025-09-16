@@ -24,13 +24,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
-<<<<<<< HEAD
 import loginAnimation from "../../../public/register.json";
 import signupAnimation from "../../../public/sign up.json";
-=======
-import loginAnimation from "@/assets/animations/login.json";
-import signupAnimation from "@/assets/animations/signup.json";
->>>>>>> 7377dd599ac4ccaf795fea8951644255cc9f8687
+
 import Lottie from "lottie-react";
 
 const motionVariants = {
