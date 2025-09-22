@@ -1,4 +1,5 @@
 import { Place } from '@/lib/types';
+import { trackCacheHit, performanceAnalytics } from './performance-analytics';
 
 export interface CachedLocationData {
   latitude: number;
@@ -6,20 +7,34 @@ export interface CachedLocationData {
   places: Place[];
   timestamp: number;
   radiusUsed: number;
+  dataType: 'places' | 'hotels' | 'restaurants' | 'mixed';
+  source: string;
 }
 
 export interface CacheConfig {
   maxAge: number; // in milliseconds
   maxEntries: number;
   radiusTolerance: number; // in meters - how close locations need to be to be considered the same
+  variableTTL: {
+    places: number;
+    hotels: number;
+    restaurants: number;
+    aiResponses: number;
+  };
 }
 
 class CacheService {
   private cache: Map<string, CachedLocationData> = new Map();
   private config: CacheConfig = {
-    maxAge: 30 * 60 * 1000, // 30 minutes
-    maxEntries: 20,
+    maxAge: 30 * 60 * 1000, // 30 minutes (fallback)
+    maxEntries: 50, // Increased for better performance
     radiusTolerance: 1000, // 1km radius tolerance
+    variableTTL: {
+      places: 2 * 60 * 60 * 1000,     // 2 hours
+      hotels: 4 * 60 * 60 * 1000,     // 4 hours
+      restaurants: 1 * 60 * 60 * 1000, // 1 hour
+      aiResponses: 24 * 60 * 60 * 1000 // 24 hours
+    }
   };
 
   private generateCacheKey(latitude: number, longitude: number, radius: number): string {
@@ -55,12 +70,30 @@ class CacheService {
     const expiredKeys: string[] = [];
 
     for (const [key, data] of this.cache.entries()) {
-      if (now - data.timestamp > this.config.maxAge) {
+      const ttl = this.getTTLForDataType(data.dataType || 'places');
+      if (now - data.timestamp > ttl) {
         expiredKeys.push(key);
       }
     }
 
-    expiredKeys.forEach(key => this.cache.delete(key));
+    if (expiredKeys.length > 0) {
+      console.log(`[Cache] 🗑️ Cleaning ${expiredKeys.length} expired entries`);
+      expiredKeys.forEach(key => this.cache.delete(key));
+    }
+  }
+
+  private getTTLForDataType(dataType: 'places' | 'hotels' | 'restaurants' | 'mixed'): number {
+    switch (dataType) {
+      case 'hotels':
+        return this.config.variableTTL.hotels;
+      case 'restaurants':
+        return this.config.variableTTL.restaurants;
+      case 'places':
+        return this.config.variableTTL.places;
+      case 'mixed':
+      default:
+        return this.config.variableTTL.places; // Default to places TTL
+    }
   }
 
   private enforceSizeLimit(): void {
@@ -70,18 +103,27 @@ class CacheService {
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
       
       const toRemove = entries.slice(0, this.cache.size - this.config.maxEntries);
-      toRemove.forEach(([key]) => this.cache.delete(key));
+      toRemove.forEach(([key]) => {
+        this.cache.delete(key);
+        performanceAnalytics.recordCacheEviction();
+      });
+      
+      // Update cache size metrics
+      performanceAnalytics.updateCacheSize(this.cache.size);
     }
   }
 
   public get(latitude: number, longitude: number, radius: number = 5000): CachedLocationData | null {
+    const startTime = Date.now();
     this.cleanExpiredEntries();
 
     // First try exact match
     const exactKey = this.generateCacheKey(latitude, longitude, radius);
     const exactMatch = this.cache.get(exactKey);
     if (exactMatch) {
+      const retrievalTime = Date.now() - startTime;
       console.log('[Cache] ✅ Exact cache hit for', exactKey);
+      trackCacheHit(true, retrievalTime);
       return exactMatch;
     }
 
@@ -89,30 +131,47 @@ class CacheService {
     for (const [key, data] of this.cache.entries()) {
       if (this.isLocationSimilar(latitude, longitude, data.latitude, data.longitude) && 
           data.radiusUsed >= radius) {
+        const retrievalTime = Date.now() - startTime;
         console.log('[Cache] ✅ Similar location cache hit:', key);
+        trackCacheHit(true, retrievalTime);
         return data;
       }
     }
 
+    const retrievalTime = Date.now() - startTime;
     console.log('[Cache] ❌ Cache miss for', exactKey);
+    trackCacheHit(false, retrievalTime);
     return null;
   }
 
-  public set(latitude: number, longitude: number, radius: number, places: Place[]): void {
+  public set(
+    latitude: number, 
+    longitude: number, 
+    radius: number, 
+    places: Place[], 
+    dataType: 'places' | 'hotels' | 'restaurants' | 'mixed' = 'mixed',
+    source: string = 'unknown'
+  ): void {
     this.cleanExpiredEntries();
     this.enforceSizeLimit();
 
     const key = this.generateCacheKey(latitude, longitude, radius);
+    const ttl = this.getTTLForDataType(dataType);
     const cacheData: CachedLocationData = {
       latitude,
       longitude,
       places,
       timestamp: Date.now(),
       radiusUsed: radius,
+      dataType,
+      source
     };
 
     this.cache.set(key, cacheData);
-    console.log('[Cache] ✅ Cached data for', key, `(${places.length} places)`);
+    console.log(`[Cache] ✅ Cached ${dataType} data for ${key} (${places.length} places, TTL: ${ttl/1000/60}min, Source: ${source})`);
+    
+    // Update cache size metrics
+    performanceAnalytics.updateCacheSize(this.cache.size);
   }
 
   public clear(): void {

@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertCircle, SlidersHorizontal } from 'lucide-react';
 import { FiltersPanel } from './filters-panel';
-import { PlaceList } from './place-list';
+import { EnhancedPlaceList } from './enhanced-place-list';
 import { useLiveLocation } from '@/context/live-location-context';
 import { LoadingSpinner } from './loading-spinner';
 
@@ -44,18 +44,92 @@ export function ExplorePage() {
   const { livePlaces, liveLocation, isLoadingInitialData, error, sourceMessage } = useLiveLocation();
   console.log('[ExplorePage] liveLocation:', liveLocation);
   console.log('[ExplorePage] livePlaces:', livePlaces);
+  
+  // Debug: Log unique categories and itemTypes in the data
+  React.useEffect(() => {
+    if (livePlaces.length > 0) {
+      const uniqueCategories = [...new Set(livePlaces.map(p => p.category).filter(Boolean))];
+      const uniqueItemTypes = [...new Set(livePlaces.map(p => p.itemType).filter(Boolean))];
+      const uniqueTypes = [...new Set(livePlaces.flatMap(p => p.types || []).filter(Boolean))];
+      
+      console.log('[ExplorePage] DEBUG - Data categories found:', uniqueCategories);
+      console.log('[ExplorePage] DEBUG - Data itemTypes found:', uniqueItemTypes);
+      console.log('[ExplorePage] DEBUG - Data types found:', uniqueTypes);
+      
+      // Sample a few places to see their structure
+      console.log('[ExplorePage] DEBUG - Sample places:', livePlaces.slice(0, 5).map(p => ({
+        name: p.name,
+        category: p.category,
+        itemType: p.itemType,
+        types: p.types
+      })));
+    }
+  }, [livePlaces]);
 
   const [filters, setFilters] = React.useState<string[]>([]);
+  const [qualityFilter, setQualityFilter] = React.useState<'all' | 'good' | 'excellent'>('good'); // Default to good quality
   const [selectedPlaceId, setSelectedPlaceId] = React.useState<string | null>(null);
 
   const filteredItems = React.useMemo(() => {
-  if (filters.length === 0) return livePlaces;
-  return livePlaces.filter((item) => {
-    //const itemTypes = item.types ? [...item.types] : [];
-    const itemTypes = item.types && item.types.length ? [...item.types] : ['place'];
-    if (item.itemType) itemTypes.push(item.itemType);
-      return filters.some(filter => itemTypes.includes(filter));
+    console.log('[ExplorePage] Filtering logic - filters:', filters, 'places count:', livePlaces.length);
+    
+    if (filters.length === 0) {
+      console.log('[ExplorePage] No filters applied, showing all places:', livePlaces.length);
+      return livePlaces;
+    }
+    
+    const filtered = livePlaces.filter((item) => {
+      // Create itemTypes array from multiple sources
+      const itemTypes = [];
+      
+      // Add from types array
+      if (item.types && item.types.length > 0) {
+        itemTypes.push(...item.types);
+      }
+      
+      // Add from itemType
+      if (item.itemType) {
+        itemTypes.push(item.itemType);
+      }
+      
+      // Add from category
+      if (item.category) {
+        itemTypes.push(item.category);
+      }
+      
+      // Fallback
+      if (itemTypes.length === 0) {
+        itemTypes.push('place');
+      }
+      
+      const matches = filters.some(filter => itemTypes.includes(filter));
+      
+      if (item.name && (item.name.toLowerCase().includes('palace') || item.name.toLowerCase().includes('fort'))) {
+        console.log('[ExplorePage] Debug place:', {
+          name: item.name,
+          category: item.category,
+          itemType: item.itemType,
+          types: item.types,
+          itemTypes,
+          filters,
+          matches
+        });
+      }
+      
+      return matches;
     });
+    
+    console.log('[ExplorePage] After filtering:', filtered.length, 'places');
+    if (filtered.length > 0) {
+      console.log('[ExplorePage] Sample filtered places:', filtered.slice(0, 3).map(p => ({
+        name: p.name,
+        category: p.category,
+        itemType: p.itemType,
+        types: p.types
+      })));
+    }
+    
+    return filtered;
   }, [livePlaces, filters]);
 
   const renderContent = () => {
@@ -94,7 +168,7 @@ export function ExplorePage() {
     return (
       <div className="flex flex-col md:flex-row h-full">
         {/* Map View */}
-        <div className="relative h-2/5 md:h-full md:w-1/2 lg:w-3/5">
+        <div className="relative h-2/5 md:h-full md:w-1/2 lg:w-3/5 z-0">
           {liveLocation && <LeafletMap 
               location={liveLocation} 
               items={filteredItems}
@@ -114,8 +188,20 @@ export function ExplorePage() {
                 {filteredItems.length} places found. {sourceMessage}
               </p>
             </div>
-            <FiltersPanel onFilterChange={setFilters} selectedFilters={filters} />
-            <PlaceList items={filteredItems} onCardClick={setSelectedPlaceId} selectedPlaceId={selectedPlaceId} />
+            <FiltersPanel 
+              onFilterChange={setFilters} 
+              selectedFilters={filters}
+              qualityFilter={qualityFilter}
+              onQualityFilterChange={setQualityFilter}
+              totalPlaces={livePlaces.length}
+              filteredPlaces={filteredItems.length}
+            />
+            <EnhancedPlaceList 
+              items={filteredItems} 
+              onCardClick={setSelectedPlaceId} 
+              selectedPlaceId={selectedPlaceId}
+              showQualityScores={qualityFilter !== 'all'} 
+            />
         </div>
       </div>
     );

@@ -75,6 +75,10 @@ export type TtsOutput = z.infer<typeof TtsOutputSchema>;
 export const ExploreInputSchema = z.object({
   latitude: z.number().describe("The user's latitude."),
   longitude: z.number().describe("The user's longitude."),
+  offset: z.number().optional().describe("The offset for pagination (number of items to skip)."),
+  limit: z.number().optional().describe("The maximum number of items to return per page."),
+  loadMore: z.boolean().optional().describe("Flag to indicate if this is a load more request."),
+  qualityFilter: z.enum(['all', 'good', 'excellent']).optional().describe("Data quality filter level for results."),
 });
 export type ExploreInput = z.infer<typeof ExploreInputSchema>;
 

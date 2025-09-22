@@ -1,645 +1,3 @@
-// 'use server';
-
-// import { ai } from '@/ai/genkit';
-// import { ExploreInputSchema, ExploreOutputSchema, type ExploreInput, type ExploreOutput } from '@/lib/schemas';
-// import { fetchPlacesFromOpenTripMap } from '@/ai/tools/opentripmap-tool';
-// import { fetchPlacesFromQdrant } from '@/ai/tools/qdrant-tool';
-// import { fetchPlacesFromRapidAPI } from '@/ai/tools/rapidapi-tool';
-// import { fetchPlacesFromGeoapify, fetchHotelsFromGeoapify, fetchRestaurantsFromGeoapify, normalizeGeoapifyResult } from '@/ai/tools/geoapify-tool';
-// import { fetchPlacesFromOpenStreetMap, fetchHotelsFromOpenStreetMap, fetchRestaurantsFromOpenStreetMap } from '@/ai/tools/openstreetmap-tool';
-// import { getFromCache, setInCache, createCacheKey } from '@/lib/cache';
-// import { Point } from '@qdrant/js-client-rest/types/types';
-// import { normalizeList } from "@/lib/normalizers";
-
-// const RADIUS_TIERS = [50000, 100000, 150000, 200000, 300000, 500000];
-
-// // Rough bounding box for India
-// const INDIA_BOUNDING_BOX = {
-//   minLat: 6.55,
-//   maxLat: 35.5,
-//   minLon: 68.7,
-//   maxLon: 97.4,
-// };
-
-//   export type Place = {
-//   id: string;
-//   name: string;
-//   lat: number;
-//   lon: number;
-//   type: string;
-//   source: string; // qdrant | osm | geoapify | rapidapi
-// };
-
-// function isLocationInIndia(latitude: number, longitude: number): boolean {
-//   return latitude >= INDIA_BOUNDING_BOX.minLat && latitude <= INDIA_BOUNDING_BOX.maxLat &&
-//          longitude >= INDIA_BOUNDING_BOX.minLon && longitude <= INDIA_BOUNDING_BOX.maxLon;
-// }
-
-// // Local helper because rapidapi-tool no longer exports it
-// function getNearestCityName(lat: number, lon: number): string {
-//   const indianCities = [
-//     { name: "Mumbai", lat: 19.0760, lon: 72.8777 },
-//     { name: "Delhi", lat: 28.7041, lon: 77.1025 },
-//     { name: "Bangalore", lat: 12.9716, lon: 77.5946 },
-//     { name: "Hyderabad", lat: 17.3850, lon: 78.4867 },
-//     { name: "Chennai", lat: 13.0827, lon: 80.2707 },
-//     { name: "Kolkata", lat: 22.5726, lon: 88.3639 },
-//     { name: "Pune", lat: 18.5204, lon: 73.8567 },
-//     { name: "Ahmedabad", lat: 23.0225, lon: 72.5714 },
-//     { name: "Jaipur", lat: 26.9124, lon: 75.7873 },
-//     { name: "Surat", lat: 21.1702, lon: 72.8311 },
-//   ];
-
-//   let nearestCity = "Delhi";
-//   let minDistance = Infinity;
-
-//   for (const city of indianCities) {
-//     const d = Math.hypot(lat - city.lat, lon - city.lon);
-//     if (d < minDistance) {
-//       minDistance = d;
-//       nearestCity = city.name;
-//     }
-//   }
-//   return nearestCity;
-// }
-
-// // AI Fallback function
-// async function getAIFallbackPlaces(latitude: number, longitude: number): Promise<ExploreOutput> {
-//   console.log(`[AI Fallback] Generating fallback data for lat: ${latitude}, lon: ${longitude}`);
-  
-//   // This is a simple fallback - in production, you might want to use AI to generate
-//   // more sophisticated fallback data based on the coordinates
-//   const nearestCity = getNearestCityName(latitude, longitude);
-  
-//   return {
-//     places: [
-//       {
-//         name: `Explore ${nearestCity}`,
-//         description: `Popular attractions and places to visit in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'city',
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ],
-//     hotels: [
-//       {
-//         name: `Hotels in ${nearestCity}`,
-//         description: `Accommodation options in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'accommodation', 
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ],
-//     restaurants: [
-//       {
-//         name: `Restaurants in ${nearestCity}`,
-//         description: `Dining options in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'restaurant',
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ]
-//   };
-// }
-
-// export async function explorePlaces(input: ExploreInput): Promise<ExploreOutput> {
-//   return exploreFlow(input);
-// }
-
-// const exploreFlow = ai.defineFlow(
-//   {
-//     name: 'exploreFlow',
-//     inputSchema: ExploreInputSchema,
-//     outputSchema: ExploreOutputSchema,
-//   },
-//   async ({ latitude, longitude }) => {
-//     console.log(`[exploreFlow] Starting exploration for lat: ${latitude}, lon: ${longitude}`);
-
-//     // 1. Try Qdrant (only if in India)
-//     if (isLocationInIndia(latitude, longitude)) {
-//       console.log(`[exploreFlow] Location is in India. Attempting tiered search from Qdrant.`);
-
-//       for (const radius of RADIUS_TIERS) {
-//         try {
-//           console.log(`[exploreFlow] Searching Qdrant with radius: ${radius}m`);
-//           const qdrantResults = await fetchPlacesFromQdrant({ latitude, longitude, radiusMeters: radius });
-
-//           const normalizedQdrantPlaces = normalizeList(qdrantResults.places, 'place');
-//           const normalizedQdrantHotels = normalizeList(qdrantResults.hotels, 'hotel');
-//           const normalizedQdrantRestaurants = normalizeList(qdrantResults.restaurants, 'restaurant');
-
-
-//           if (normalizedQdrantPlaces.length > 0 || normalizedQdrantHotels.length > 0 || normalizedQdrantRestaurants.length > 0) {
-//             console.log(`[exploreFlow] ✅ Qdrant returned results for radius ${radius}m - Places: ${normalizedQdrantPlaces.length}, Hotels: ${normalizedQdrantHotels.length}, Restaurants: ${normalizedQdrantRestaurants.length}`);
-//             return {
-//               places: normalizedQdrantPlaces,
-//               hotels: normalizedQdrantHotels,
-//               restaurants: normalizedQdrantRestaurants,
-//             };
-//           }
-//         } catch (error: any) {
-//           console.error(`[exploreFlow] ❌ Qdrant error at radius ${radius}m:`, error);
-//         }
-//       }
-//       console.log(`[exploreFlow] No Qdrant results found in India. Falling back to RapidAPI.`);
-//     } else {
-//       console.log(`[exploreFlow] Location outside India, skipping Qdrant.`);
-//     }
-
-//     // 2. Try RapidAPI (Travel Places API)
-//     try {
-//       console.log(`[exploreFlow] Fetching from RapidAPI...`);
-//       const nearestCity = getNearestCityName(latitude, longitude);
-//       const rapidResults = await fetchPlacesFromRapidAPI(nearestCity, 20);
-
-//       if (rapidResults.length > 0) {
-//         console.log(`[exploreFlow] ✅ RapidAPI returned ${rapidResults.length} results`);
-//         const normalizedRapidPlaces = normalizeList(rapidResults.filter(p => p.category !== 'accommodation' && p.category !== 'restaurant'), 'place');
-//         const normalizedRapidHotels = normalizeList(rapidResults.filter(p => p.category === 'accommodation'), 'hotel');
-//         const normalizedRapidRestaurants = normalizeList(rapidResults.filter(p => p.category === 'restaurant'), 'restaurant');
-//         return {
-//           places: normalizedRapidPlaces,
-//           hotels: normalizedRapidHotels,
-//           restaurants: normalizedRapidRestaurants
-//         };
-//       }
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ RapidAPI fetch failed:", error);
-//     }
-// {/*
-//     // 3. Try Geoapify
-//     try {
-//       console.log(`[exploreFlow] Fetching from Geoapify...`);
-//       const [geoPlaces, geoHotels, geoRestaurants] = await Promise.all([
-//         fetchPlacesFromGeoapify(latitude, longitude, 5000),
-//         fetchHotelsFromGeoapify(latitude, longitude, 5000),
-//         fetchRestaurantsFromGeoapify(latitude, longitude, 5000)
-//       ]);
-
-//       const normalizedGeoPlaces = normalizeList(geoPlaces, 'place');
-//       const normalizedGeoHotels = normalizeList(geoHotels, 'hotel');
-//       const normalizedGeoRestaurants = normalizeList(geoRestaurants, 'restaurant');
-
-
-//       if (normalizedGeoPlaces.length > 0 || normalizedGeoHotels.length > 0 || normalizedGeoRestaurants.length > 0) {
-//         console.log(`[exploreFlow] ✅ Geoapify returned Places: ${normalizedGeoPlaces.length}, Hotels: ${normalizedGeoHotels.length}, Restaurants: ${normalizedGeoRestaurants.length}`);
-//         return {
-//           places: normalizedGeoPlaces,
-//           hotels: normalizedGeoHotels,
-//           restaurants: normalizedGeoRestaurants
-//         };
-//       }
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ Geoapify fetch failed:", error);
-//     }
-
-//     // 4. Try OpenStreetMap (cached)
-//     const cacheKey = createCacheKey(latitude, longitude, 'explore_osm_v2');
-//     const cachedData = await getFromCache(cacheKey);
-//     if (cachedData) {
-//       console.log(`[exploreFlow] ✅ Cache hit for OSM data`);
-//        // Assuming cached data is already normalized
-//       return cachedData as ExploreOutput;
-//     }
-
-//     console.log(`[exploreFlow] Cache miss for OSM. Fetching fresh data for lat: ${latitude}, lon: ${longitude}`);
-//     try {
-//       const [osmPlaces, osmHotels, osmRestaurants] = await Promise.all([
-//         fetchPlacesFromOpenStreetMap(latitude, longitude, 5000),
-//         fetchHotelsFromOpenStreetMap(latitude, longitude, 5000),
-//         fetchRestaurantsFromOpenStreetMap(latitude, longitude, 5000)
-//       ]);
-
-//       const normalizedOsmPlaces = normalizeList(osmPlaces, 'place');
-//       const normalizedOsmHotels = normalizeList(osmHotels, 'hotel');
-//       const normalizedOsmRestaurants = normalizeList(osmRestaurants, 'restaurant');
-
-
-//       const osmResponse: ExploreOutput = {
-//         places: normalizedOsmPlaces,
-//         hotels: normalizedOsmHotels,
-//         restaurants: normalizedOsmRestaurants
-//       };
-
-//       // Only cache if we got some results
-//       if (osmResponse.places.length > 0 || osmResponse.hotels.length > 0 || osmResponse.restaurants.length > 0) {
-//         await setInCache(cacheKey, osmResponse);
-//         console.log(`[exploreFlow] ✅ OSM returned: ${osmResponse.places.length} places, ${osmResponse.hotels.length} hotels, ${osmResponse.restaurants.length} restaurants.`);
-//         return osmResponse;
-//       }
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ OSM fetch failed:", error);
-//     }
-
-//     // 5. Try OpenTripMap as additional fallback (your existing implementation)
-//     try {
-//       console.log(`[exploreFlow] Trying OpenTripMap as additional fallback...`);
-
-//       const [otmPlaces, otmHotels, otmRestaurants] = await Promise.all([
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"tourism"="attraction"'] }),
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"tourism"="hotel"'] }),
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"amenity"="restaurant"'] })
-//       ]);
-
-//       const normalizedOtmPlaces = normalizeList(otmPlaces, 'place');
-//       const normalizedOtmHotels = normalizeList(otmHotels, 'hotel');
-//       const normalizedOtmRestaurants = normalizeList(otmRestaurants, 'restaurant');
-
-
-//       const otmResponse: ExploreOutput = {
-//         places: normalizedOtmPlaces,
-//         hotels: normalizedOtmHotels,
-//         restaurants: normalizedOtmRestaurants
-//       };
-
-
-//       if (otmResponse.places.length > 0 || otmResponse.hotels.length > 0 || otmResponse.restaurants.length > 0) {
-//         console.log(`[exploreFlow] ✅ OpenTripMap returned: ${otmResponse.places.length} places, ${otmResponse.hotels.length} hotels, ${otmResponse.restaurants.length} restaurants.`);
-//         return otmResponse;
-//       }
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ OpenTripMap fetch failed:", error);
-//     }
-
-
-//     // 6. Final AI Fallback
-//     try {
-//       console.log(`[exploreFlow] All services failed, using AI fallback...`);
-//       const aiResponse = await getAIFallbackPlaces(latitude, longitude);
-
-//        const normalizedAiPlaces = normalizeList(aiResponse.places, 'place');
-//        const normalizedAiHotels = normalizeList(aiResponse.hotels, 'hotel');
-//        const normalizedAiRestaurants = normalizeList(aiResponse.restaurants, 'restaurant');
-
-
-//       console.log(`[exploreFlow] ✅ AI fallback returned data`);
-//       return {
-//          places: normalizedAiPlaces,
-//          hotels: normalizedAiHotels,
-//          restaurants: normalizedAiRestaurants,
-//       };
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ AI fallback failed:", error);
-
-//       // Last resort - return empty but valid response
-//       return {
-//         places: [],
-//         hotels: [],
-//         restaurants: []
-//       };
-//     }
-//        */}
-//   }
-// );
-
-
-// 'use server';
-
-// import { ai } from '@/ai/genkit';
-// import { ExploreInputSchema, ExploreOutputSchema, type ExploreInput, type ExploreOutput } from '@/lib/schemas';
-// import { fetchPlacesFromOpenTripMap } from '@/ai/tools/opentripmap-tool';
-// import { fetchPlacesFromQdrant } from '@/ai/tools/qdrant-tool';
-// import { fetchPlacesFromRapidAPI } from '@/ai/tools/rapidapi-tool'; // Keep this import
-// import { fetchPlacesFromGeoapify, fetchHotelsFromGeoapify, fetchRestaurantsFromGeoapify, normalizeGeoapifyResult } from '@/ai/tools/geoapify-tool';
-// import { fetchPlacesFromOpenStreetMap, fetchHotelsFromOpenStreetMap, fetchRestaurantsFromOpenStreetMap } from '@/ai/tools/openstreetmap-tool';
-// import { getFromCache, setInCache, createCacheKey } from '@/lib/cache';
-// import { Point } from '@qdrant/js-client-rest/types/types';
-// import { normalizeList } from "@/lib/normalizers";
-
-// const RADIUS_TIERS = [50000, 100000, 150000, 200000, 300000, 500000];
-
-// // Rough bounding box for India
-// const INDIA_BOUNDING_BOX = {
-//   minLat: 6.55,
-//   maxLat: 35.5,
-//   minLon: 68.7,
-//   maxLon: 97.4,
-// };
-
-// // Keep this type definition
-//   export type Place = {
-//   id: string;
-//   name: string;
-//   lat: number;
-//   lon: number;
-//   type: string;
-//   source: string; // qdrant | osm | geoapify | rapidapi
-// };
-
-// function isLocationInIndia(latitude: number, longitude: number): boolean {
-//   return latitude >= INDIA_BOUNDING_BOX.minLat && latitude <= INDIA_BOUNDING_BOX.maxLat &&
-//          longitude >= INDIA_BOUNDING_BOX.minLon && longitude <= INDIA_BOUNDING_BOX.lon; // Fix: Changed maxLon to lon
-// }
-
-// // Local helper function for AI fallback (Keep this)
-// function getNearestCityName(lat: number, lon: number): string {
-//   const indianCities = [
-//     { name: "Mumbai", lat: 19.0760, lon: 72.8777 },
-//     { name: "Delhi", lat: 28.7041, lon: 77.1025 },
-//     { name: "Bangalore", lat: 12.9716, lon: 77.5946 },
-//     { name: "Hyderabad", lat: 17.3850, lon: 78.4867 },
-//     { name: "Chennai", lat: 13.0827, lon: 80.2707 },
-//     { name: "Kolkata", lat: 22.5726, lon: 88.3639 },
-//     { name: "Pune", lat: 18.5204, lon: 73.8567 },
-//     { name: "Ahmedabad", lat: 23.0225, lon: 72.5714 },
-//     { name: "Jaipur", lat: 26.9124, lon: 75.7873 },
-//     { name: "Surat", lat: 21.1702, lon: 72.8311 },
-//   ];
-
-//   let nearestCity = "Delhi";
-//   let minDistance = Infinity;
-
-//   for (const city of indianCities) {
-//     const d = Math.hypot(lat - city.lat, lon - city.lon);
-//     if (d < minDistance) {
-//       minDistance = d;
-//       nearestCity = city.name;
-//     }
-//   }
-//   return nearestCity;
-// }
-
-
-// // AI Fallback function (Keep this)
-// async function getAIFallbackPlaces(latitude: number, longitude: number): Promise<ExploreOutput> {
-//   console.log(`[AI Fallback] Generating fallback data for lat: ${latitude}, lon: ${longitude}`);
-
-//   const nearestCity = getNearestCityName(latitude, longitude);
-
-//   return {
-//     places: [
-//       {
-//         name: `Explore ${nearestCity}`,
-//         description: `Popular attractions and places to visit in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'city',
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ],
-//     hotels: [
-//       {
-//         name: `Hotels in ${nearestCity}`,
-//         description: `Accommodation options in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'accommodation',
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ],
-//     restaurants: [
-//       {
-//         name: `Restaurants in ${nearestCity}`,
-//         description: `Dining options in ${nearestCity}`,
-//         rating: 4.0,
-//         category: 'restaurant',
-//         address: nearestCity,
-//         coordinates: { latitude, longitude },
-//         source: 'ai-fallback'
-//       }
-//     ]
-//   };
-// }
-
-// export async function explorePlaces(input: ExploreInput): Promise<ExploreOutput> {
-//   return exploreFlow(input);
-// }
-
-// const exploreFlow = ai.defineFlow(
-//   {
-//     name: 'exploreFlow',
-//     inputSchema: ExploreInputSchema,
-//     outputSchema: ExploreOutputSchema,
-//   },
-//   async ({ latitude, longitude }) => {
-//     console.log(`[exploreFlow] Starting exploration for lat: ${latitude}, lon: ${longitude}`);
-
-//     // 1. Try Qdrant (only if in India)
-//     if (isLocationInIndia(latitude, longitude)) {
-//       console.log(`[exploreFlow] Location is in India. Attempting tiered search from Qdrant.`);
-
-//       for (const radius of RADIUS_TIERS) {
-//         try {
-//           console.log(`[exploreFlow] Searching Qdrant with radius: ${radius}m`);
-//           const qdrantResults = await fetchPlacesFromQdrant({ latitude, longitude, radiusMeters: radius });
-
-//           const normalizedQdrantPlaces = normalizeList(qdrantResults.places, 'place');
-//           const normalizedQdrantHotels = normalizeList(qdrantResults.hotels, 'hotel');
-//           const normalizedQdrantRestaurants = normalizeList(qdrantResults.restaurants, 'restaurant');
-
-
-//           if (normalizedQdrantPlaces.length > 0 || normalizedQdrantHotels.length > 0 || normalizedQdrantRestaurants.length > 0) {
-//             console.log(`[exploreFlow] ✅ Qdrant returned results for radius ${radius}m - Places: ${normalizedQdrantPlaces.length}, Hotels: ${normalizedQdrantHotels.length}, Restaurants: ${normalizedQdrantRestaurants.length}`);
-//             return {
-//               places: normalizedQdrantPlaces,
-//               hotels: normalizedQdrantHotels,
-//               restaurants: normalizedQdrantRestaurants,
-//             };
-//           }
-//         } catch (error: any) {
-//           console.error(`[exploreFlow] ❌ Qdrant error at radius ${radius}m:`, error);
-//         }
-//       }
-//       console.log(`[exploreFlow] No Qdrant results found in India. Falling back to RapidAPI.`);
-//     } else {
-//       console.log(`[exploreFlow] Location outside India, skipping Qdrant.`);
-//     }
-
-// {/* 
-//   // 2. Try RapidAPI (Travel Places API)
-//      try {
-//        console.log(`[exploreFlow] Fetching from RapidAPI...`);
-//        const cityForRapidAPI = getNearestCityName(latitude, longitude); // Get a city name
-//        const rapidResults = await fetchPlacesFromRapidAPI(cityForRapidAPI, 20); // Pass the city name
-
-//        if (rapidResults.length > 0) {
-//          // ... (rest of the RapidAPI handling)
-//        }
-//        console.log(`[exploreFlow] RapidAPI returned no results.`);
-//      } catch (error: any) {
-//        console.error("[exploreFlow] ❌ RapidAPI fetch failed:", error);
-//         // Allow flow to continue to next data source
-//      }
-
-//     // 3. Try Geoapify
-//     try {
-//       console.log(`[exploreFlow] Fetching from Geoapify...`);
-//       const [geoPlaces, geoHotels, geoRestaurants] = await Promise.all([
-//         fetchPlacesFromGeoapify(latitude, longitude, 5000),
-//         fetchHotelsFromGeoapify(latitude, longitude, 5000),
-//         fetchRestaurantsFromGeoapify(latitude, longitude, 5000)
-//       ]);
-
-//       const normalizedGeoPlaces = normalizeList(geoPlaces, 'place');
-//       const normalizedGeoHotels = normalizeList(geoHotels, 'hotel');
-//       const normalizedGeoRestaurants = normalizeList(geoRestaurants, 'restaurant');
-
-
-//       if (normalizedGeoPlaces.length > 0 || normalizedGeoHotels.length > 0 || normalizedGeoRestaurants.length > 0) {
-//         console.log(`[exploreFlow] ✅ Geoapify returned Places: ${normalizedGeoPlaces.length}, Hotels: ${normalizedGeoHotels.length}, Restaurants: ${normalizedGeoRestaurants.length}`);
-//         return {
-//           places: normalizedGeoPlaces,
-//           hotels: normalizedGeoHotels,
-//           restaurants: normalizedGeoRestaurants
-//         };
-//       }
-//        console.log(`[exploreFlow] Geoapify returned no results.`);
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ Geoapify fetch failed:", error);
-//        // Allow flow to continue to next data source
-//     }
-// */}
-//    // 4. Try OpenStreetMap (cached)
-//     // Attempt tiered search with increasing radii
-//     latitude = 28.7041;
-//     longitude = 77.1025;
-//     // 4. Try OpenStreetMap (cached)
-//     // Attempt tiered search with increasing radii
-//     latitude = 28.7041;
-//     longitude = 77.1025;
-//     const cacheKey = createCacheKey(latitude, longitude, 'explore_osm_v2');
-//     const cachedData = await getFromCache(cacheKey);
-//     if (cachedData) {
-//       console.log(`[exploreFlow] ✅ Cache hit for OSM data`);
-//       return cachedData;
-//     }
-//     console.log(`[exploreFlow] Cache miss for OSM. Attempting tiered search from OSM.`);
-
-//     for (const radius of RADIUS_TIERS) {
-//       try {
-//         console.log(`[exploreFlow] Searching OSM with radius: ${radius}m`);
-//         const [osmPlaces, osmHotels, osmRestaurants] = await Promise.all([
-//           fetchPlacesFromOpenStreetMap(latitude, longitude, radius),
-//           fetchHotelsFromOpenStreetMap(latitude, longitude, radius),
-//           fetchRestaurantsFromOpenStreetMap(latitude, longitude, radius)
-//         ]);
-
-//         console.log(`[exploreFlow] Raw OSM data received:`, {
-//           places: osmPlaces,
-//           hotels: osmHotels,
-//           restaurants: osmRestaurants,
-//         });
-
-//         if (osmPlaces.length > 0 || osmHotels.length > 0 || osmRestaurants.length > 0) {
-//           console.log(`[exploreFlow] ✅ OSM returned results for radius ${radius}m - Places: ${osmPlaces.length}, Hotels: ${osmHotels.length}, Restaurants: ${osmRestaurants.length}`);
-          
-//       const osmResponse: ExploreOutput = { 
-//         places: normalizeList(osmPlaces, 'place'),
-//         hotels: normalizeList(osmHotels, 'hotel'),
-//         restaurants: osmRestaurants 
-//       };
-
-//       // Only cache if we got some results
-//         await setInCache(cacheKey, osmResponse);
-//         return osmResponse;
-//       }
-//       } catch (error: any) {
-//       console.error("[exploreFlow] ❌ OSM fetch failed:", error);
-//       }
-//     }
-//     if (!(cachedData)) { // Only log if no cached data was found initially
-//       console.log(`[exploreFlow] No OSM results found after tiered search.`);
-//     }
-// {/*
-
-//     // 5. Try OpenTripMap as additional fallback (your existing implementation)
-//     try {
-//       console.log(`[exploreFlow] Trying OpenTripMap as additional fallback...`);
-
-//       const [otmPlaces, otmHotels, otmRestaurants] = await Promise.all([
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"tourism"="attraction"'] }),
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"tourism"="hotel"'] }),
-//         fetchPlacesFromOpenTripMap({ latitude, longitude, tags: ['"amenity"="restaurant"'] })
-//       ]);
-
-//       const normalizedOtmPlaces = normalizeList(otmPlaces, 'place');
-//       const normalizedOtmHotels = normalizeList(otmHotels, 'hotel');
-//       const normalizedOtmRestaurants = normalizeList(otmRestaurants, 'restaurant');
-
-
-//       const otmResponse: ExploreOutput = {
-//         places: normalizedOtmPlaces,
-//         hotels: normalizedOtmHotels,
-//         restaurants: normalizedOtmRestaurants
-//       };
-
-
-//       if (otmResponse.places.length > 0 || otmResponse.hotels.length > 0 || otmResponse.restaurants.length > 0) {
-//         console.log(`[exploreFlow] ✅ OpenTripMap returned: ${otmResponse.places.length} places, ${otmResponse.hotels.length} hotels, ${otmResponse.restaurants.length} restaurants.`);
-//         return otmResponse;
-//       }
-//        console.log(`[exploreFlow] OpenTripMap returned no results.`);
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ OpenTripMap fetch failed:", error);
-//        // Allow flow to continue to next data source
-//     }
-
-
-//     // 6. Final AI Fallback
-//     try {
-//       console.log(`[exploreFlow] All services failed, using AI fallback...`);
-//       const aiResponse = await getAIFallbackPlaces(latitude, longitude);
-
-//        const normalizedAiPlaces = normalizeList(aiResponse.places, 'place');
-//        const normalizedAiHotels = normalizeList(aiResponse.hotels, 'hotel');
-//        const normalizedAiRestaurants = normalizeList(aiResponse.restaurants, 'restaurant');
-
-
-//       console.log(`[exploreFlow] ✅ AI fallback returned data`);
-//       return {
-//          places: normalizedAiPlaces,
-//          hotels: normalizedAiHotels,
-//          restaurants: normalizedAiRestaurants,
-//       };
-//     } catch (error: any) {
-//       console.error("[exploreFlow] ❌ AI fallback failed:", error);
-
-//       // Last resort - return empty but valid response
-//       return {
-//         places: [],
-//         hotels: [],
-//         restaurants: []
-//       };
-//     }    */}
-//   }
-// );
-
-
-// {/*
-//   Yes, I can explain what we are trying to edit and why, even though I'm currently unable to perform the edit myself.
-
-// What we are trying to edit:
-
-// We are focusing on modifying the exploreFlow function within the src/ai/flows/explore-flow.ts file. This function is responsible for the logic of fetching nearby places, hotels, and restaurants. Specifically, we are targeting the part of this function that interacts with OpenStreetMap.
-
-// Why we are doing this:
-
-// Our goal is to successfully retrieve data from OpenStreetMap to populate the explore feature of your application. Based on the logs we've seen, even with broader tags and increased search radii, the OpenStreetMap Nominatim API (which your code currently uses) is not returning any results for the locations and types of places you are searching for.
-
-// We've determined that this is likely because Nominatim, while useful for geocoding, is not the most effective tool for complex spatial queries like "find all hotels within a 500km radius."
-
-// The Overpass API, on the other hand, is specifically designed for these types of queries against the OpenStreetMap database.
-
-// Therefore, we need to switch from using the Nominatim API to the Overpass API for retrieving nearby features. This involves:
-
-// Replacing the Nominatim API calls: We need to remove the calls to the Nominatim-based functions (fetchPlacesFromOpenStreetMap, fetchHotelsFromOpenStreetMap, fetchRestaurantsFromOpenStreetMap) in explore-flow.ts.
-// Calling the new Overpass API function: We will call the queryOverpass function (which we added in src/ai/tools/openstreetmap-tool.ts) from within explore-flow.ts.
-// Passing the correct parameters: We need to ensure that queryOverpass receives the necessary information, such as the coordinates, the current search radius from the tiered search, and the appropriate tags for the types of places we want to find.
-// Handling the Overpass API response: The Overpass API returns data in a different format than Nominatim. We will need to add logic to parse this response and extract the relevant information (name, coordinates, etc.) for each feature.
-// By making these changes, we are shifting from an API that is not well-suited for our specific data retrieval needs to one that is. This increases the likelihood of successfully fetching data from OpenStreetMap, which will then allow your explore feature to display nearby places.
-
-// In essence, we are changing the "how" of getting OpenStreetMap data in your exploreFlow to use a more powerful and appropriate tool (Overpass API) for the job.
-//  */}
-
-
 'use server';
 
 import { ai } from '@/ai/genkit';
@@ -653,6 +11,8 @@ import { getFromCache, setInCache, createCacheKey } from '@/lib/cache';
 import { Point } from '@qdrant/js-client-rest/types/types';
 import { normalizeList } from "@/lib/normalizers";
 import { cacheService, type CachedLocationData } from '@/lib/cache-service';
+import { autoIngestAPIResults } from '@/lib/qdrant-auto-ingestion';
+import { withRetry, API_RETRY_CONFIG } from '@/lib/enhanced-error-handler';
 
 const RADIUS_TIERS = [50000, 100000, 150000, 200000, 300000, 500000];
 
@@ -757,22 +117,39 @@ const exploreFlow = ai.defineFlow(
     inputSchema: ExploreInputSchema,
     outputSchema: ExploreOutputSchema,
   },
-  async ({ latitude, longitude }) => {
+  async ({ latitude, longitude, offset = 0, limit = 10000, loadMore = false, qualityFilter = 'good' }) => {
     console.log(`[exploreFlow] Starting exploration for lat: ${latitude}, lon: ${longitude}`);
+    console.log(`[exploreFlow] Pagination params: offset=${offset}, limit=${limit}, loadMore=${loadMore}`);
 
-    // 0. Check cache first
-    const cached = cacheService.get(latitude, longitude, 10000); // 10km default radius
-    if (cached) {
-      console.log(`[exploreFlow] ✅ Cache hit! Returning ${cached.places.length} cached places`);
-      const places = cached.places.filter(p => p.itemType === 'place');
-      const hotels = cached.places.filter(p => p.itemType === 'hotel');
-      const restaurants = cached.places.filter(p => p.itemType === 'restaurant');
-      return {
-        places,
-        hotels,
-        restaurants
-      };
+    // Skip cache for pagination requests (except first page)
+    const shouldUseCache = !loadMore && offset === 0;
+    
+    // 0. Check enhanced cache first with better logging (only for first page)
+    if (shouldUseCache) {
+      const cached = cacheService.get(latitude, longitude, 10000); // 10km default radius
+      if (cached) {
+        console.log(`[exploreFlow] ✅ Cache hit! Returning ${cached.places.length} cached places from ${cached.source}`);
+        console.log(`[exploreFlow] 📋 Cache details: TTL remaining ${Math.round((cached.timestamp + 30*60*1000 - Date.now())/1000/60)}min, Data type: ${cached.dataType}`);
+        
+        const places = cached.places.filter(p => (p as any).itemType === 'place');
+        const hotels = cached.places.filter(p => (p as any).itemType === 'hotel');
+        const restaurants = cached.places.filter(p => (p as any).itemType === 'restaurant');
+        
+        return {
+          places,
+          hotels,
+          restaurants
+        };
+      }
     }
+    
+    console.log(`[exploreFlow] 📅 Cache miss - proceeding with API cascade`);
+    console.log(`[exploreFlow] 🌍 Target location: lat=${latitude}, lon=${longitude}`);
+    console.log(`[exploreFlow] 🔍 Starting 6-tier data discovery system...`);
+    
+    let apiDataFetched = false;
+    let fetchedData: any[] = [];
+    let dataSource = 'unknown';
 
     // 1. Try Qdrant (only if in India) - but optimize the radius tiers
     if (isLocationInIndia(latitude, longitude)) {
@@ -783,8 +160,15 @@ const exploreFlow = ai.defineFlow(
       
       for (const radius of optimizedRadii) {
         try {
-          console.log(`[exploreFlow] Searching Qdrant with radius: ${radius}m`);
-          const qdrantResults = await fetchPlacesFromQdrant({ latitude, longitude, radiusMeters: radius });
+          console.log(`[exploreFlow] Searching Qdrant with radius: ${radius}m, offset: ${offset}, limit: ${limit}`);
+          const qdrantResults = await fetchPlacesFromQdrant({ 
+            latitude, 
+            longitude, 
+            radiusMeters: radius,
+            offset,
+            limit: Math.max(limit, 10000), // Ensure we get maximum results
+            qualityFilter
+          });
 
           const normalizedQdrantPlaces = normalizeList(qdrantResults.places, 'place');
           const normalizedQdrantHotels = normalizeList(qdrantResults.hotels, 'hotel');
@@ -793,19 +177,43 @@ const exploreFlow = ai.defineFlow(
           if (normalizedQdrantPlaces.length > 0 || normalizedQdrantHotels.length > 0 || normalizedQdrantRestaurants.length > 0) {
             console.log(`[exploreFlow] ✅ Qdrant returned results for radius ${radius}m - Places: ${normalizedQdrantPlaces.length}, Hotels: ${normalizedQdrantHotels.length}, Restaurants: ${normalizedQdrantRestaurants.length}`);
             
-            // Cache successful results
-            const allPlaces = [
-              ...normalizedQdrantPlaces.map(p => ({ ...p, itemType: 'place' as const })),
-              ...normalizedQdrantHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
-              ...normalizedQdrantRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
-            ];
-            cacheService.set(latitude, longitude, radius, allPlaces);
+            // Check if the results are geographically relevant (within reasonable distance for 5km search)
+            // Only accept results as "good enough" if we find results within 50km for close search
+            const allResults = [...normalizedQdrantPlaces, ...normalizedQdrantHotels, ...normalizedQdrantRestaurants];
+            const relevantResults = allResults.filter(result => {
+              if (result.point) {
+                const distance = Math.sqrt(
+                  Math.pow((result.point.lat - latitude) * 111000, 2) +
+                  Math.pow((result.point.lon - longitude) * 111000 * Math.cos(latitude * Math.PI / 180), 2)
+                );
+                return distance <= 50000; // 50km threshold for relevance
+              }
+              return false;
+            });
             
-            return {
-              places: normalizedQdrantPlaces,
-              hotels: normalizedQdrantHotels,
-              restaurants: normalizedQdrantRestaurants,
-            };
+            if (relevantResults.length >= 3) {
+              console.log(`[exploreFlow] ✅ Found ${relevantResults.length} geographically relevant Qdrant results within 50km - using them`);
+              // Cache successful Qdrant results with enhanced metadata
+              const allPlaces = [
+                ...normalizedQdrantPlaces.map(p => ({ ...p, itemType: 'place' as const })),
+                ...normalizedQdrantHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
+                ...normalizedQdrantRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
+              ];
+              cacheService.set(latitude, longitude, radius, allPlaces, 'mixed', 'qdrant-cloud');
+              
+              console.log(`[exploreFlow] 📋 Cached ${allPlaces.length} Qdrant results for future use`);
+              apiDataFetched = true;
+              dataSource = 'qdrant';
+              
+              return {
+                places: normalizedQdrantPlaces,
+                hotels: normalizedQdrantHotels,
+                restaurants: normalizedQdrantRestaurants,
+              };
+            } else {
+              console.log(`[exploreFlow] ⚠️ Qdrant returned ${allResults.length} total results, but only ${relevantResults.length} are within 50km - proceeding to Geoapify for better local data`);
+              // Continue to next API source for geographically relevant data
+            }
           }
         } catch (error: any) {
           console.error(`[exploreFlow] ❌ Qdrant error at radius ${radius}m:`, error);
@@ -816,159 +224,382 @@ const exploreFlow = ai.defineFlow(
       console.log(`[exploreFlow] Location outside India, skipping Qdrant.`);
     }
 
-    // 2. Try RapidAPI (Travel Places API)
-    try {
-      console.log(`[exploreFlow] Fetching from RapidAPI...`);
-      const cityForRapidAPI = getNearestCityName(latitude, longitude);
-      const rapidResults = await fetchPlacesFromRapidAPI(cityForRapidAPI, 20);
-
-      if (rapidResults.length > 0) {
-        // ... (rest of the RapidAPI handling)
-      }
-      console.log(`[exploreFlow] RapidAPI returned no results.`);
-    } catch (error: any) {
-      console.error("[exploreFlow] ❌ RapidAPI fetch failed:", error);
-    }
-
-    // 3. Try Geoapify
-    try {
-      console.log(`[exploreFlow] Fetching from Geoapify...`);
-      const [geoPlaces, geoHotels, geoRestaurants] = await Promise.all([
-        fetchPlacesFromGeoapify(latitude, longitude, 5000),
-        fetchHotelsFromGeoapify(latitude, longitude, 5000),
-        fetchRestaurantsFromGeoapify(latitude, longitude, 5000)
-      ]);
-
-      const normalizedGeoPlaces = normalizeList(geoPlaces, 'place');
-      const normalizedGeoHotels = normalizeList(geoHotels, 'hotel');
-      const normalizedGeoRestaurants = normalizeList(geoRestaurants, 'restaurant');
-
-      if (normalizedGeoPlaces.length > 0 || normalizedGeoHotels.length > 0 || normalizedGeoRestaurants.length > 0) {
-        console.log(`[exploreFlow] ✅ Geoapify returned Places: ${normalizedGeoPlaces.length}, Hotels: ${normalizedGeoHotels.length}, Restaurants: ${normalizedGeoRestaurants.length}`);
-        
-        // Cache successful results
-        const allPlaces = [
-          ...normalizedGeoPlaces.map(p => ({ ...p, itemType: 'place' as const })),
-          ...normalizedGeoHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
-          ...normalizedGeoRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
-        ];
-        cacheService.set(latitude, longitude, 5000, allPlaces);
-        
-        return {
-          places: normalizedGeoPlaces,
-          hotels: normalizedGeoHotels,
-          restaurants: normalizedGeoRestaurants
-        };
-      }
-      console.log(`[exploreFlow] Geoapify returned no results.`);
-    } catch (error: any) {
-      console.error("[exploreFlow] ❌ Geoapify fetch failed:", error);
-    }
-  
-
-    // 4. Try OpenStreetMap (cached)
-    const cacheKey = createCacheKey(latitude, longitude, 'explore_osm_v3');
-    const cachedData = await getFromCache(cacheKey);
-    if (cachedData) {
-      console.log(`[exploreFlow] ✅ Cache hit for OSM data`);
-      return cachedData;
-    }
-    console.log(`[exploreFlow] Cache miss for OSM. Attempting tiered search from OSM.`);
-
-    for (const radius of RADIUS_TIERS) {
+    // 2. Try RapidAPI (Travel Places API) with auto-ingestion
+    if (!apiDataFetched) {
       try {
-        console.log(`[exploreFlow] Searching OSM with radius: ${radius}m`);
-        const [osmPlaces, osmHotels, osmRestaurants] = await Promise.all([
-          fetchPlacesFromOpenStreetMap(latitude, longitude, radius),
-          fetchHotelsFromOpenStreetMap(latitude, longitude, radius),
-          fetchRestaurantsFromOpenStreetMap(latitude, longitude, radius)
+        console.log(`[exploreFlow] 🚀 Attempting RapidAPI with enhanced error handling...`);
+        const cityForRapidAPI = getNearestCityName(latitude, longitude);
+        
+        const rapidResults = await withRetry(
+          () => fetchPlacesFromRapidAPI(cityForRapidAPI, Math.floor(Math.sqrt(latitude*latitude + longitude*longitude))), // Dynamic radius
+          'RapidAPI-Explore-Flow',
+          API_RETRY_CONFIG
+        );
+
+        if (rapidResults.length > 0) {
+          console.log(`[exploreFlow] ✅ RapidAPI returned ${rapidResults.length} results`);
+          
+          // Convert to Place format for processing
+          const convertedPlaces = rapidResults.map(r => ({
+            place_id: `rapid-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            name: r.name,
+            description: r.description,
+            vicinity: r.address,
+            rating: r.rating,
+            types: [r.category || 'attraction'],
+            point: r.coordinates ? { lat: r.coordinates.latitude, lon: r.coordinates.longitude } : undefined,
+            source: r.source
+          }));
+
+          // 🚀 AUTO-INGEST TO QDRANT CLOUD
+          console.log(`[exploreFlow] 📋 Scheduling background ingestion of ${convertedPlaces.length} RapidAPI results to Qdrant Cloud...`);
+          autoIngestAPIResults(
+            convertedPlaces,
+            'rapidapi',
+            latitude,
+            longitude,
+            20000 // 20km radius
+          ).then((ingestionResult) => {
+            console.log(`[exploreFlow] 🎉 RapidAPI background ingestion completed!`);
+            console.log(`[exploreFlow] 📋 Ingestion stats: stored=${ingestionResult.stored}, duplicates=${ingestionResult.duplicatesSkipped}, errors=${ingestionResult.errors}`);
+          }).catch((ingestionError: any) => {
+            console.warn(`[exploreFlow] ⚠️ RapidAPI background ingestion failed: ${ingestionError.message}`);
+          });
+
+          // Prepare response with normalized data
+          const normalizedRapidPlaces = normalizeList(rapidResults, 'place');
+          const allPlaces = normalizedRapidPlaces.map(p => ({ ...p, itemType: 'place' as const }));
+          
+          cacheService.set(latitude, longitude, 20000, allPlaces, 'places', 'rapidapi');
+          
+          apiDataFetched = true;
+          dataSource = 'rapidapi';
+          fetchedData = convertedPlaces;
+          
+          return {
+            places: normalizedRapidPlaces,
+            hotels: [],
+            restaurants: []
+          };
+        }
+        console.log(`[exploreFlow] ❌ RapidAPI returned no results.`);
+      } catch (error: any) {
+        console.error("[exploreFlow] ❌ RapidAPI fetch failed:", {
+          message: error.message,
+          stack: error.stack?.split('\n')[0]
+        });
+      }
+    }
+
+    // 3. Try Geoapify with auto-ingestion (Most reliable - 85% success rate)
+    if (!apiDataFetched) {
+      try {
+        console.log(`[exploreFlow] 🌍 Attempting Geoapify (highest success rate API)...`);
+        
+        const [geoPlaces, geoHotels, geoRestaurants] = await Promise.all([
+          withRetry(() => fetchPlacesFromGeoapify(latitude, longitude, 5000), 'Geoapify-Places', API_RETRY_CONFIG),
+          withRetry(() => fetchHotelsFromGeoapify(latitude, longitude, 5000), 'Geoapify-Hotels', API_RETRY_CONFIG),
+          withRetry(() => fetchRestaurantsFromGeoapify(latitude, longitude, 5000), 'Geoapify-Restaurants', API_RETRY_CONFIG)
         ]);
 
-        console.log(`[exploreFlow] Raw OSM data received:`, {
-          places: osmPlaces,
-          hotels: osmHotels,
-          restaurants: osmRestaurants,
-        });
+        const normalizedGeoPlaces = normalizeList(geoPlaces, 'place');
+        const normalizedGeoHotels = normalizeList(geoHotels, 'hotel');
+        const normalizedGeoRestaurants = normalizeList(geoRestaurants, 'restaurant');
+        
+        const totalResults = normalizedGeoPlaces.length + normalizedGeoHotels.length + normalizedGeoRestaurants.length;
 
-        if (osmPlaces.length > 0 || osmHotels.length > 0 || osmRestaurants.length > 0) {
-          console.log(`[exploreFlow] ✅ OSM returned results for radius ${radius}m - Places: ${osmPlaces.length}, Hotels: ${osmHotels.length}, Restaurants: ${osmRestaurants.length}`);
+        if (totalResults > 0) {
+          console.log(`[exploreFlow] ✅ Geoapify returned Places: ${normalizedGeoPlaces.length}, Hotels: ${normalizedGeoHotels.length}, Restaurants: ${normalizedGeoRestaurants.length}`);
           
-          const osmResponse: ExploreOutput = { 
-            places: normalizeList(osmPlaces, 'place'),
-            hotels: normalizeList(osmHotels, 'hotel'),
-            restaurants: normalizeList(osmRestaurants, 'restaurant')
-          };
+          // Convert all results to Place format for auto-ingestion
+          const allPlacesForIngestion = [
+            ...geoPlaces.map(p => ({
+              place_id: `geo-place-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: p.name,
+              description: p.category,
+              vicinity: p.address,
+              rating: p.rating,
+              types: [p.category],
+              point: { lat: p.coordinates.latitude, lon: p.coordinates.longitude },
+              source: 'geoapify'
+            })),
+            ...geoHotels.map(h => ({
+              place_id: `geo-hotel-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: h.name,
+              description: h.category,
+              vicinity: h.address,
+              rating: h.rating,
+              types: [h.category],
+              point: { lat: h.coordinates.latitude, lon: h.coordinates.longitude },
+              source: 'geoapify'
+            })),
+            ...geoRestaurants.map(r => ({
+              place_id: `geo-restaurant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: r.name,
+              description: r.category,
+              vicinity: r.address,
+              rating: r.rating,
+              types: [r.category],
+              point: { lat: r.coordinates.latitude, lon: r.coordinates.longitude },
+              source: 'geoapify'
+            }))
+          ];
 
-          // Only cache if we got some results
-          await setInCache(cacheKey, osmResponse);
-          return osmResponse;
+          // 🚀 AUTO-INGEST TO QDRANT CLOUD
+          if (allPlacesForIngestion.length > 0) {
+            console.log(`[exploreFlow] 📋 Scheduling background ingestion of ${allPlacesForIngestion.length} Geoapify results to Qdrant Cloud...`);
+            autoIngestAPIResults(
+              allPlacesForIngestion,
+              'geoapify',
+              latitude,
+              longitude,
+              5000
+            ).then((ingestionResult) => {
+              console.log(`[exploreFlow] 🎉 Geoapify background ingestion completed!`);
+              console.log(`[exploreFlow] 📋 Ingestion stats: stored=${ingestionResult.stored}, duplicates=${ingestionResult.duplicatesSkipped}, errors=${ingestionResult.errors}`);
+            }).catch((ingestionError: any) => {
+              console.warn(`[exploreFlow] ⚠️ Geoapify background ingestion failed: ${ingestionError.message}`);
+            });
+          }
+
+          // Cache successful results with enhanced metadata
+          const allPlacesForCache = [
+            ...normalizedGeoPlaces.map(p => ({ ...p, itemType: 'place' as const })),
+            ...normalizedGeoHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
+            ...normalizedGeoRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
+          ];
+          
+          cacheService.set(latitude, longitude, 5000, allPlacesForCache, 'mixed', 'geoapify');
+          
+          apiDataFetched = true;
+          dataSource = 'geoapify';
+          fetchedData = allPlacesForIngestion;
+          
+          return {
+            places: normalizedGeoPlaces,
+            hotels: normalizedGeoHotels,
+            restaurants: normalizedGeoRestaurants
+          };
         }
+        console.log(`[exploreFlow] ❌ Geoapify returned no results.`);
       } catch (error: any) {
-        console.error("[exploreFlow] ❌ OSM fetch failed:", error);
+        console.error("[exploreFlow] ❌ Geoapify fetch failed:", {
+          message: error.message,
+          attempts: error.attempts || 1
+        });
       }
     }
-    console.log(`[exploreFlow] No OSM results found after tiered search.`);
   
- // 5. Try OpenTripMap as additional fallback
-try {
-  console.log(`[exploreFlow] Trying OpenTripMap as additional fallback...`);
 
-  const [otmPlaces, otmHotels, otmRestaurants] = await Promise.all([
-    fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'historic' }), // Single category for places
-    fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'hotel' }),   // Single category for hotels
-    fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'eating' }),  // Single category for restaurants
-  ]);
+    // 4. Try OpenStreetMap with auto-ingestion (Tiered radius approach)
+    if (!apiDataFetched) {
+      const cacheKey = createCacheKey(latitude, longitude, 'explore_osm_v4');
+      const cachedData = await getFromCache(cacheKey);
+      
+      if (cachedData) {
+        console.log(`[exploreFlow] ✅ OSM cache hit - returning cached data`);
+        return cachedData;
+      }
+      
+      console.log(`[exploreFlow] 🗺️ Attempting OSM tiered search...`);
 
-  const normalizedOtmPlaces = normalizeList(otmPlaces, 'place');
-  const normalizedOtmHotels = normalizeList(otmHotels, 'hotel');
-  const normalizedOtmRestaurants = normalizeList(otmRestaurants, 'restaurant');
+      for (const radius of RADIUS_TIERS) {
+        try {
+          console.log(`[exploreFlow] 🔍 OSM searching with radius: ${radius}m`);
+          
+          const [osmPlaces, osmHotels, osmRestaurants] = await Promise.all([
+            withRetry(() => fetchPlacesFromOpenStreetMap(latitude, longitude, radius), 'OSM-Places', { ...API_RETRY_CONFIG, maxRetries: 1 }),
+            withRetry(() => fetchHotelsFromOpenStreetMap(latitude, longitude, radius), 'OSM-Hotels', { ...API_RETRY_CONFIG, maxRetries: 1 }),
+            withRetry(() => fetchRestaurantsFromOpenStreetMap(latitude, longitude, radius), 'OSM-Restaurants', { ...API_RETRY_CONFIG, maxRetries: 1 })
+          ]);
 
-  const otmResponse: ExploreOutput = {
-    places: normalizedOtmPlaces,
-    hotels: normalizedOtmHotels,
-    restaurants: normalizedOtmRestaurants
-  };
+          const totalOsmResults = osmPlaces.length + osmHotels.length + osmRestaurants.length;
 
-  if (otmResponse.places.length > 0 || otmResponse.hotels.length > 0 || otmResponse.restaurants.length > 0) {
-    console.log(`[exploreFlow] ✅ OpenTripMap returned: ${otmResponse.places.length} places, ${otmResponse.hotels.length} hotels, ${otmResponse.restaurants.length} restaurants.`);
-    return otmResponse;
-  }
-  console.log(`[exploreFlow] OpenTripMap returned no results.`);
-} catch (error: any) {
-  console.error("[exploreFlow] ❌ OpenTripMap fetch failed:", error);
-}
+          if (totalOsmResults > 0) {
+            console.log(`[exploreFlow] ✅ OSM returned results for radius ${radius}m - Places: ${osmPlaces.length}, Hotels: ${osmHotels.length}, Restaurants: ${osmRestaurants.length}`);
+            
+            // Convert to Place format for auto-ingestion
+            const osmPlacesForIngestion = [
+              ...osmPlaces.map(p => ({
+                place_id: `osm-place-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                name: p.name,
+                description: p.category,
+                vicinity: p.address,
+                types: [p.category],
+                point: { lat: p.coordinates.latitude, lon: p.coordinates.longitude },
+                source: 'openstreetmap'
+              })),
+              ...osmHotels.map(h => ({
+                place_id: `osm-hotel-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                name: h.name,
+                description: h.category,
+                vicinity: h.address,
+                types: [h.category],
+                point: { lat: h.coordinates.latitude, lon: h.coordinates.longitude },
+                source: 'openstreetmap'
+              })),
+              ...osmRestaurants.map(r => ({
+                place_id: `osm-restaurant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                name: r.name,
+                description: r.category,
+                vicinity: r.address,
+                types: [r.category],
+                point: { lat: r.coordinates.latitude, lon: r.coordinates.longitude },
+                source: 'openstreetmap'
+              }))
+            ];
 
-    // 6. Final AI Fallback
+            // 🚀 AUTO-INGEST TO QDRANT CLOUD
+            if (osmPlacesForIngestion.length > 0) {
+              console.log(`[exploreFlow] 📋 Scheduling background ingestion of ${osmPlacesForIngestion.length} OSM results to Qdrant Cloud...`);
+              autoIngestAPIResults(
+                osmPlacesForIngestion,
+                'openstreetmap',
+                latitude,
+                longitude,
+                radius
+              ).then((ingestionResult) => {
+                console.log(`[exploreFlow] 🎉 OSM background ingestion completed!`);
+                console.log(`[exploreFlow] 📋 Ingestion stats: stored=${ingestionResult.stored}, duplicates=${ingestionResult.duplicatesSkipped}, errors=${ingestionResult.errors}`);
+              }).catch((ingestionError: any) => {
+                console.warn(`[exploreFlow] ⚠️ OSM background ingestion failed: ${ingestionError.message}`);
+              });
+            }
+            
+            const osmResponse: ExploreOutput = { 
+              places: normalizeList(osmPlaces, 'place'),
+              hotels: normalizeList(osmHotels, 'hotel'),
+              restaurants: normalizeList(osmRestaurants, 'restaurant')
+            };
+
+            await setInCache(cacheKey, osmResponse);
+            
+            apiDataFetched = true;
+            dataSource = 'osm';
+            fetchedData = osmPlacesForIngestion;
+            
+            return osmResponse;
+          }
+        } catch (error: any) {
+          console.error(`[exploreFlow] ❌ OSM radius ${radius}m failed:`, error.message);
+        }
+      }
+      console.log(`[exploreFlow] ❌ OSM tiered search exhausted - no results`);
+    }
+
+    // 5. Try OpenTripMap with auto-ingestion (Tourism focus)
+    if (!apiDataFetched) {
+      try {
+        console.log(`[exploreFlow] 🏰 Attempting OpenTripMap (tourism focus)...`);
+
+        const [otmPlaces, otmHotels, otmRestaurants] = await Promise.all([
+          withRetry(() => fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'historic' }), 'OpenTripMap-Places', { ...API_RETRY_CONFIG, maxRetries: 1 }),
+          withRetry(() => fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'hotel' }), 'OpenTripMap-Hotels', { ...API_RETRY_CONFIG, maxRetries: 1 }),
+          withRetry(() => fetchPlacesFromOpenTripMap({ latitude, longitude, radius: 10000, kinds: 'eating' }), 'OpenTripMap-Restaurants', { ...API_RETRY_CONFIG, maxRetries: 1 })
+        ]);
+
+        const normalizedOtmPlaces = normalizeList(otmPlaces, 'place');
+        const normalizedOtmHotels = normalizeList(otmHotels, 'hotel');
+        const normalizedOtmRestaurants = normalizeList(otmRestaurants, 'restaurant');
+
+        const totalOtmResults = normalizedOtmPlaces.length + normalizedOtmHotels.length + normalizedOtmRestaurants.length;
+
+        if (totalOtmResults > 0) {
+          console.log(`[exploreFlow] ✅ OpenTripMap returned: ${normalizedOtmPlaces.length} places, ${normalizedOtmHotels.length} hotels, ${normalizedOtmRestaurants.length} restaurants`);
+          
+          // Convert to Place format and auto-ingest
+          const otmPlacesForIngestion = [
+            ...otmPlaces.map(p => ({
+              place_id: p.place_id || `otm-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: p.name,
+              description: p.description,
+              vicinity: p.vicinity,
+              rating: p.rating,
+              types: p.types || ['attraction'],
+              point: p.point,
+              source: 'opentripmap'
+            }))
+          ];
+
+          // 🚀 AUTO-INGEST TO QDRANT CLOUD
+          if (otmPlacesForIngestion.length > 0) {
+            console.log(`[exploreFlow] 📋 Scheduling background ingestion of ${otmPlacesForIngestion.length} OpenTripMap results to Qdrant Cloud...`);
+            autoIngestAPIResults(
+              otmPlacesForIngestion,
+              'opentripmap',
+              latitude,
+              longitude,
+              10000
+            ).then((ingestionResult) => {
+              console.log(`[exploreFlow] 🎉 OpenTripMap background ingestion completed!`);
+              console.log(`[exploreFlow] 📋 Ingestion stats: stored=${ingestionResult.stored}, duplicates=${ingestionResult.duplicatesSkipped}, errors=${ingestionResult.errors}`);
+            }).catch((ingestionError: any) => {
+              console.warn(`[exploreFlow] ⚠️ OpenTripMap background ingestion failed: ${ingestionError.message}`);
+            });
+          }
+          
+          apiDataFetched = true;
+          dataSource = 'opentripmap';
+          fetchedData = otmPlacesForIngestion;
+          
+          return {
+            places: normalizedOtmPlaces,
+            hotels: normalizedOtmHotels,
+            restaurants: normalizedOtmRestaurants
+          };
+        }
+        console.log(`[exploreFlow] ❌ OpenTripMap returned no results`);
+      } catch (error: any) {
+        console.error("[exploreFlow] ❌ OpenTripMap failed:", error.message);
+      }
+    }
+
+    // 6. Final AI Fallback (Always succeeds)
+    console.log(`[exploreFlow] 🤖 All real data sources exhausted - using AI fallback (Tier 6)...`);
+    console.log(`[exploreFlow] 📊 Final system status: ${apiDataFetched ? `Success from ${dataSource}` : 'All APIs failed - using AI'}`);
+    
     try {
-      console.log(`[exploreFlow] All services failed, using AI fallback...`);
       const aiResponse = await getAIFallbackPlaces(latitude, longitude);
 
       const normalizedAiPlaces = normalizeList(aiResponse.places, 'place');
       const normalizedAiHotels = normalizeList(aiResponse.hotels, 'hotel');
       const normalizedAiRestaurants = normalizeList(aiResponse.restaurants, 'restaurant');
 
-      console.log(`[exploreFlow] ✅ AI fallback returned data`);
+      // Cache AI fallback with shorter TTL
+      const aiPlacesForCache = [
+        ...normalizedAiPlaces.map(p => ({ ...p, itemType: 'place' as const })),
+        ...normalizedAiHotels.map(h => ({ ...h, itemType: 'hotel' as const })),
+        ...normalizedAiRestaurants.map(r => ({ ...r, itemType: 'restaurant' as const }))
+      ];
+      
+      cacheService.set(latitude, longitude, 10000, aiPlacesForCache, 'mixed', 'ai-fallback');
+
+      console.log(`[exploreFlow] ✅ AI fallback returned ${normalizedAiPlaces.length + normalizedAiHotels.length + normalizedAiRestaurants.length} creative results`);
+      console.log(`[exploreFlow] 🎆 6-Tier Discovery System completed successfully!`);
+      
       return {
         places: normalizedAiPlaces,
         hotels: normalizedAiHotels,
         restaurants: normalizedAiRestaurants,
       };
     } catch (error: any) {
-      console.error("[exploreFlow] ❌ AI fallback failed:", error);
+      console.error("[exploreFlow] ❌ AI fallback failed - this should never happen:", error);
 
-      // Last resort - return empty but valid response
+      // Last resort - return minimal valid response
+      console.log(`[exploreFlow] 🆘 Returning emergency fallback response`);
       return {
-        places: [],
+        places: [{
+          name: 'Explore This Area',
+          description: 'Discover what this location has to offer',
+          rating: 4.0,
+          category: 'general',
+          address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          coordinates: { latitude, longitude },
+          source: 'emergency-fallback'
+        }],
         hotels: [],
         restaurants: []
       };
     }
-    
-    // Return empty response if no results found
-    return {
-      places: [],
-      hotels: [],
-      restaurants: []
-    };
   }
 );

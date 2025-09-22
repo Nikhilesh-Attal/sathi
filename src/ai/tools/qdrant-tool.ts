@@ -1,5 +1,6 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { type ExploreOutput } from '@/lib/schemas';
+import { filterTouristPlaces, filterHighQualityPlaces } from '@/lib/data-quality-filter';
 
 const QDRANT_URL = process.env.QDRANT_URL;
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
@@ -21,9 +22,11 @@ export interface QdrantPlace {
 export interface QdrantSearchParams {
   latitude: number;
   longitude: number;
-  radiusMeters: number;
+  radiusMeters?: number;
   limit?: number;
+  offset?: number; // For pagination
   minScore?: number;
+  qualityFilter?: 'all' | 'good' | 'excellent'; // Data quality filtering
 }
 
 class QdrantTool {
@@ -72,23 +75,28 @@ class QdrantTool {
   /**
    * Search for places in a specific collection
    */
-  // src/ai/tools/qdrant-tool.ts
+  // Enhanced search with pagination support
 async searchInCollection(
   collectionName: string,
   params: QdrantSearchParams
 ): Promise<QdrantPlace[]> {
-  try {
-    const client = await this.ensureClient();
-    const { latitude, longitude, radiusMeters, limit = 50 } = params;
+  const client = await this.ensureClient();
+  const { latitude, longitude, radiusMeters, limit = 10000, offset = 0 } = params;
+  
+  console.log(`[Qdrant] Searching with unlimited results: offset=${offset}, limit=${limit}`);
 
-    // Use geo filter to pull candidates
-    const { points } = await client.scroll(collectionName, {
-      limit: Math.min(200, Math.max(limit * 3, 60)), // oversample then filter by distance
+  // Helper to perform geo scroll on a given field key with unlimited fetch
+  const geoScroll = async (fieldKey: string) => {
+    // Fetch maximum possible results - no practical limit
+    const fetchLimit = Math.max(limit * 2, 10000); // Ensure we get all available data
+    
+    return client.scroll(collectionName, {
+      limit: fetchLimit,
       with_payload: true,
       filter: {
         must: [
           {
-            key: 'coordinates', // your payload field
+            key: fieldKey,
             geo_radius: {
               center: { lat: latitude, lon: longitude },
               radius: radiusMeters ?? 50000,
@@ -97,41 +105,103 @@ async searchInCollection(
         ],
       },
     });
+  };
 
-    const inRadius = (points ?? []).filter((p: any) => {
-      const c = p.payload?.coordinates;
-      if (!c?.latitude || !c?.longitude) return false;
-      const d = this.calculateDistance(latitude, longitude, c.latitude, c.longitude);
-      return !radiusMeters || d <= radiusMeters;
-    });
+  let points: any[] | undefined;
 
-    // Sort by distance then cap to limit
-    const sorted = inRadius.sort((a: any, b: any) => {
-      const da = this.calculateDistance(
-        latitude, longitude, a.payload.coordinates.latitude, a.payload.coordinates.longitude
-      );
-      const db = this.calculateDistance(
-        latitude, longitude, b.payload.coordinates.latitude, b.payload.coordinates.longitude
-      );
-      return da - db;
-    }).slice(0, limit);
-
-    return sorted.map((hit: any) => ({
-      name: hit.payload?.name || 'Unknown Place',
-      description: hit.payload?.description,
-      rating: hit.payload?.rating,
-      category: hit.payload?.category || 'misc',
-      address: hit.payload?.address || '',
-      coordinates: {
-        latitude: hit.payload?.coordinates?.latitude,
-        longitude: hit.payload?.coordinates?.longitude,
-      },
-      source: 'qdrant',
-    }));
-  } catch (error: any) {
-    console.error('[Qdrant] searchInCollection failed:', error.message);
-    return [];
+  // Try 'coordinates' (preferred)
+  try {
+    const res = await geoScroll('coordinates');
+    points = res.points;
+  } catch (e1: any) {
+    console.warn('[Qdrant] geo scroll on "coordinates" failed:', e1.message);
+    // Fallback to legacy 'coords' (from external uploader)
+    try {
+      const res2 = await geoScroll('coords');
+      points = res2.points;
+    } catch (e2: any) {
+      console.error('[Qdrant] geo scroll fallback on "coords" failed:', e2.message);
+      
+      // Final fallback: try simple scroll without geo filtering to see if data exists
+      try {
+        console.log('[Qdrant] Trying simple scroll without geo filtering...');
+        const fetchLimit = Math.max(limit * 2, 10000); // No practical limit
+        const res3 = await client.scroll(collectionName, {
+          limit: fetchLimit,
+          with_payload: true,
+        });
+        points = res3.points;
+        console.log(`[Qdrant] 🔍 Simple scroll found ${points?.length || 0} total records`);
+        
+        // Debug: Log some sample data to see what we have
+        if (points && points.length > 0) {
+          console.log(`[Qdrant] 📝 Sample records:`);
+          points.slice(0, 3).forEach((p, i) => {
+            const payload = p.payload || {};
+            const coords = payload.coords || {};
+            console.log(`  ${i+1}. ${payload.name} at (${coords.lat}, ${coords.lon}) - ${payload.source}`);
+          });
+        }
+      } catch (e3: any) {
+        console.error('[Qdrant] Simple scroll also failed:', e3.message);
+        return [];
+      }
+    }
   }
+
+  const inRadius = (points ?? []).filter((p: any) => {
+    // Support multiple payload shapes
+    const pc = p.payload || {};
+    const c = pc.coordinates || pc.coords || {};
+    const lat = c.lat ?? c.latitude;
+    const lon = c.lon ?? c.longitude;
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      console.log(`[Qdrant] ⚠️ Skipping ${pc.name} - invalid coordinates: lat=${lat}, lon=${lon}`);
+      return false;
+    }
+    const d = this.calculateDistance(latitude, longitude, lat, lon);
+    const withinRadius = !radiusMeters || d <= radiusMeters;
+    
+    if (withinRadius) {
+      console.log(`[Qdrant] ✅ ${pc.name} at (${lat}, ${lon}) - distance: ${Math.round(d)}m`);
+    } else {
+      console.log(`[Qdrant] ❌ ${pc.name} at (${lat}, ${lon}) - distance: ${Math.round(d)}m (beyond ${radiusMeters}m)`);
+    }
+    
+    return withinRadius;
+  });
+
+  // Sort by distance and apply pagination
+  const sorted = inRadius
+    .sort((a: any, b: any) => {
+      const pa = a.payload || {}; const ca = pa.coordinates || pa.coords || {};
+      const pb = b.payload || {}; const cb = pb.coordinates || pb.coords || {};
+      const latA = ca.lat ?? ca.latitude; const lonA = ca.lon ?? ca.longitude;
+      const latB = cb.lat ?? cb.latitude; const lonB = cb.lon ?? cb.longitude;
+      const da = this.calculateDistance(latitude, longitude, latA, lonA);
+      const db = this.calculateDistance(latitude, longitude, latB, lonB);
+      return da - db;
+    })
+    .slice(offset, offset + limit); // Apply offset and limit for pagination
+  
+  console.log(`[Qdrant] Returning ${sorted.length} items (offset: ${offset}, total filtered: ${inRadius.length})`);
+
+  return sorted.map((hit: any) => {
+    const p = hit.payload || {};
+    const c = p.coordinates || p.coords || {};
+    const lat = c.lat ?? c.latitude;
+    const lon = c.lon ?? c.longitude;
+    return {
+      name: p.name || 'Unknown Place',
+      description: p.description,
+      rating: p.rating,
+      category: p.category || 'misc',
+      address: p.address || '',
+      coordinates: { latitude: lat, longitude: lon },
+      source: 'qdrant',
+      itemType: p.itemType || 'place', // Include itemType from payload
+    } as QdrantPlace & { itemType: string };
+  });
 }
 
   /**
@@ -192,30 +262,52 @@ const COLLECTION_NAMES = {
 
 export async function fetchPlacesFromQdrant(params: QdrantSearchParams): Promise<ExploreOutput> {
   try {
-    console.log(`[Qdrant] Starting comprehensive search for lat: ${params.latitude}, lon: ${params.longitude}, radius: ${params.radiusMeters}m`);
+    const { qualityFilter = 'all', ...searchParams } = params;
+    console.log(`[Qdrant] Starting comprehensive search for lat: ${params.latitude}, lon: ${params.longitude}, radius: ${params.radiusMeters}m, quality: ${qualityFilter}`);
 
-    // Search in parallel across different collections
-    const [places, hotels, restaurants] = await Promise.all([
-      qdrantTool.searchInCollection(COLLECTION_NAMES.places, params),
-      qdrantTool.searchInCollection(COLLECTION_NAMES.hotels, params),
-      qdrantTool.searchInCollection(COLLECTION_NAMES.restaurants, params),
-    ]);
+    // Search the unified 'places' collection which contains all data with itemType field
+    let allResults = await qdrantTool.searchInCollection('places', { ...searchParams, limit: 10000 }); // Get more results before filtering
 
-    // Also try searching attractions collection and merge with places
-    try {
-      const attractions = await qdrantTool.searchInCollection(COLLECTION_NAMES.attractions, params);
-      places.push(...attractions);
-    } catch (error) {
-      console.log('[Qdrant] Attractions collection not available or failed');
+    console.log(`[Qdrant] Raw results before quality filtering: ${allResults.length}`);
+
+    // Apply quality filtering based on the selected level
+    if (qualityFilter === 'excellent') {
+      allResults = filterHighQualityPlaces(allResults as any[]);
+      console.log(`[Qdrant] After excellent quality filter: ${allResults.length}`);
+    } else if (qualityFilter === 'good') {
+      allResults = filterTouristPlaces(allResults as any[]);
+      console.log(`[Qdrant] After good quality filter: ${allResults.length}`);
     }
+    // For 'all', no additional filtering
+
+    // Apply pagination after filtering
+    const offset = params.offset || 0;
+    const limit = params.limit || 50;
+    const paginatedResults = allResults.slice(offset, offset + limit);
+
+    // Separate results by itemType from the unified collection
+    const places = paginatedResults.filter(item => {
+      const itemType = (item as any).itemType;
+      return !itemType || itemType === 'place';
+    });
+    
+    const hotels = paginatedResults.filter(item => {
+      const itemType = (item as any).itemType;
+      return itemType === 'hotel';
+    });
+    
+    const restaurants = paginatedResults.filter(item => {
+      const itemType = (item as any).itemType;
+      return itemType === 'restaurant';
+    });
 
     const result: ExploreOutput = {
-      places: places.slice(0, 20), // Limit results
-      hotels: hotels.slice(0, 20),
-      restaurants: restaurants.slice(0, 20)
+      places,
+      hotels,
+      restaurants
     };
 
-    console.log(`[Qdrant] ✅ Total results - Places: ${result.places.length}, Hotels: ${result.hotels.length}, Restaurants: ${result.restaurants.length}`);
+    console.log(`[Qdrant] ✅ Quality-filtered and paginated results - Places: ${result.places.length}, Hotels: ${result.hotels.length}, Restaurants: ${result.restaurants.length}`);
     
     return result;
 

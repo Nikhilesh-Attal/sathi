@@ -61,7 +61,11 @@ export const LiveLocationProvider = ({ children }: { children: React.ReactNode }
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ latitude: loc.latitude, longitude: loc.longitude }),
+        body: JSON.stringify({ 
+          latitude: loc.latitude, 
+          longitude: loc.longitude,
+          qualityFilter: 'good' // Default to good quality filter
+        }),
       });
       
       if (!res.ok) {

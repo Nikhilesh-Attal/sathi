@@ -22,6 +22,17 @@ export interface Place {
   address?: string;
   imageUrl?: string;
   createdAt?: number;
+  // Alternative coordinate formats (for different APIs)
+  latitude?: number;
+  longitude?: number;
+  geometry?: {
+    location?: {
+      lat: number;
+      lng: number;
+    };
+  };
+  formatted_address?: string;
+  photos?: Array<{photo_reference: string}>;
 }
 
 // A unified type for any item that can be saved. It's based on the Google Place schema
